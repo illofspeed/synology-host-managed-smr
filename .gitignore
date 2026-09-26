@@ -1,0 +1,6 @@
+# Key material and secrets must never be committed.
+*.key
+*.rkey
+*.img
+*.pw
+secrets*

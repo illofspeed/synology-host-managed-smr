@@ -1,0 +1,40 @@
+# /volume1/zoned-attach/attach.conf - read by synology-zoned-attach.sh ONCE, when it starts.
+# After ANY edit, restart the watcher:   /usr/local/etc/rc.d/S99zoned-attach.sh restart
+# (Forgetting this has cost the author two controller moves: the old watcher keeps the old
+# values and attaches the controller to the old guest.)
+#
+# DSM's own controllers are NOT set here. They are hard-coded in PROTECT_PCI_HARD inside
+# synology-zoned-attach.sh, so this file can never un-protect them. You may ADD addresses
+# (full form 0000:bb:ss.f, space-separated):
+#PROTECT_PCI=""
+
+# libvirt domain UUID of the VMM guest that gets the controller. VMM defines guests only
+# while they run, so start the guest first, then on DSM:
+#   /usr/local/bin/virsh list --all --uuid
+# and match it inside the guest with:  cat /sys/class/dmi/id/product_uuid
+# Format: DOM="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx". The script refuses to run while empty.
+DOM=""
+
+# vendor:device of the controller that carries the zoned drives, as printed by
+# /sys/bus/pci/devices/<address>/vendor and .../device. Only 0x1b4b:0x9235 (Marvell 88SE9235,
+# the DS3622xs+ controller behind the DX1222 expansion unit) has been tested.
+CTRL_VENDOR=0x1b4b
+CTRL_DEVICE=0x9235
+
+# Substring of the zoned drives' model and how many of them must be behind the controller
+# before it is chosen. Use a short substring: the sysfs model field can be truncated.
+# WSH722870 = WD Ultrastar DC HC680 27 TB (WSH722870AL...).
+ZONED_MODEL=WSH722870
+ZONED_COUNT=3
+
+# Substring(s) of the models of DSM's OWN drives, space-separated. A controller with one of
+# them behind it is never chosen or touched. REQUIRED - the script refuses to run while empty.
+# The author's DSM drives were WUH721818 (WD Ultrastar DC HC550 18 TB).
+DSM_MODEL=""
+
+# 1 = reload kvm_intel with nested=1 at NAS boot, before any guest runs (Intel only).
+# Only needed if the guest runs VMs itself; an OpenMediaVault guest does not.
+WANT_NESTED=0
+
+# Seconds between checks (whole number from 1 to 3600, at most 4 digits).
+POLL=15

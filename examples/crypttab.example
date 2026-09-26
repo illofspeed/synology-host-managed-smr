@@ -1,0 +1,13 @@
+# /etc/crypttab - entry for the pool's LUKS2 container.
+#
+# "noauto" is REQUIRED. Without it, systemd-cryptsetup-generator creates
+# systemd-cryptsetup@hc680crypt.service, which runs early in boot (before cryptsetup.target)
+# and waits for /dev/md/hc680 - but the RAID is only assembled by the late chain
+# (zonedpool-dmzassemble -> zonedpool-mdassemble, both After=local-fs.target). The early unit
+# blocks the boot until its device timeout, then fails; the pool stays locked and unmounted.
+# zonedpool-cryptopen.service opens the container instead. The entry is kept for manual use.
+#
+# <LUKS_UUID>: cryptsetup luksUUID /dev/md/hc680
+#
+# name      device            keyfile                    options
+hc680crypt  UUID=<LUKS_UUID>  /etc/zonedpool/hc680.key   luks,noauto,discard,no-read-workqueue,no-write-workqueue

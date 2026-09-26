@@ -1,0 +1,13 @@
+# /etc/mdadm/mdadm.conf - the lines that matter for the pool (Debian's generated comments omitted).
+#
+# Get your ARRAY line with:   mdadm --detail --scan
+# After editing this file:    update-initramfs -u
+#
+# The members (/dev/mapper/dz1..dz3) only exist after zonedpool-dmzassemble.service has run,
+# so the initramfs cannot assemble this array; zonedpool-mdassemble.service does it later
+# (or udev does it incrementally as the mappers appear).
+
+HOMEHOST <system>
+MAILADDR root
+
+ARRAY /dev/md/hc680 metadata=1.2 name=hc680 UUID=<MD_UUID>

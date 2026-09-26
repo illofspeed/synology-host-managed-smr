@@ -1,0 +1,24 @@
+# /etc/systemd/system/zonedpool-mdassemble.service
+# Step 2 of the late boot chain: assemble the RAID5 once all dm-zoned members exist.
+# The mapper names (dz1..dz3) and the array name (/dev/md/hc680) are hard-coded below and must
+# match /etc/zonedpool/dmzoned.conf and /etc/mdadm/mdadm.conf. The unit name is referenced
+# from /etc/fstab (x-systemd.requires=); renaming it silently breaks the mount ordering.
+# See docs/03-guest-storage-stack.md.
+[Unit]
+Description=Assemble the hc680 RAID5 once its dm-zoned members exist
+After=zonedpool-dmzassemble.service
+Requires=zonedpool-dmzassemble.service
+ConditionPathExists=/etc/mdadm/mdadm.conf
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=15min
+# 1. make sure the /dev/mapper nodes exist and wait (<= 5 min each) for dz1..dz3
+# 2. assemble by UUID from mdadm.conf; fall back to naming the members explicitly
+# 3. udev may already have assembled the array incrementally, so assembly errors are ignored
+#    and success is judged only by /dev/md/hc680 existing
+ExecStart=/bin/bash -c '/sbin/dmsetup mknodes; for i in 1 2 3; do for t in $(seq 1 60); do [ -b /dev/mapper/dz$i ] && break; sleep 5; done; done; /sbin/mdadm --assemble --scan || /sbin/mdadm --assemble /dev/md/hc680 /dev/mapper/dz1 /dev/mapper/dz2 /dev/mapper/dz3 || true; sleep 2; [ -b /dev/md/hc680 ]'
+
+[Install]
+WantedBy=multi-user.target

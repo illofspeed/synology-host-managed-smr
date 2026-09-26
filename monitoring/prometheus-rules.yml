@@ -1,0 +1,140 @@
+# Prometheus alert rules for a pool of host-managed SMR drives built as
+#   each drive -> dm-zoned (dz1..dzN) -> md RAID5 -> LUKS2 -> XFS at /srv/hc680
+# Metrics: scripts/guest/zoned-pool-metrics (node_exporter textfile collector, every 5 min).
+# Every rule is explained in docs/05-operations-monitoring-performance.md.
+#
+# Check before loading:   promtool check rules prometheus-rules.yml
+# Keep backup copies OUT of the rules directory: anything a rule_files glob matches is loaded.
+#
+# Derived from the author's as-built rules (in use since 2026-09-24; the two stuck-worker rules
+# since 2026-09-26). Differences: wording, no host names, and the degraded summary no longer
+# prints the gauge value as a member count; Hc680SmartUnknown covers unreadable health.
+# The other expressions and thresholds are unchanged.
+groups:
+  - name: hc680
+    interval: 1m
+    rules:
+      - alert: Hc680PoolDown
+        expr: hc680_array_up == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "hc680 pool is not mounted - shares and the backup target are offline"
+          description: >-
+            Either the md array did not assemble or /srv/hc680 is not mounted. The chain is
+            zonedpool-dmzassemble (dm-zoned mappers from by-id, waits up to 600 s per drive)
+            -> zonedpool-mdassemble -> zonedpool-cryptopen (LUKS) -> srv-hc680.mount.
+            Check them in that order. After a VMM power cycle of the guest the drives only
+            appear after the NAS watcher has re-attached the controller, so a short alert
+            right after a guest power cycle is possible.
+
+      - alert: Hc680ArrayDegraded
+        expr: hc680_array_degraded == 1
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "hc680 RAID5 is DEGRADED - no redundancy left"
+          description: >-
+            RAID5 survives one lost member and nothing more. Avoid heavy writes until it is
+            rebuilt. Check /proc/mdstat and dmesg. A member is a dm-zoned mapper, so the fault
+            may be the mapping rather than the drive: "dmsetup ls" should list every dz mapper.
+
+      - alert: Hc680ParityMismatches
+        expr: hc680_array_mismatch_cnt > 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "hc680 parity mismatches: {{ $value }}"
+          description: >-
+            A check or repair found stripes whose parity did not match the data. Expected
+            during the first repair after "mdadm --create --assume-clean" (one build found 752).
+            md keeps the count of the last pass, so the alert stays until the next pass; run a
+            "check" after the repair. If a check AFTER a completed repair finds mismatches,
+            that is real: parity is being damaged during normal operation.
+
+      - alert: Hc680SmartFailed
+        expr: hc680_smart_ok == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "SMART failure on {{ $labels.device }}"
+
+      - alert: Hc680SmartUnknown
+        expr: hc680_smart_health_known == 0
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "SMART health of {{ $labels.device }} cannot be read (SMART disabled or device not answering)"
+
+      - alert: Hc680DriveHot
+        expr: hc680_smart_temperature_celsius > 55
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.device }} at {{ $value }}C"
+
+      - alert: Hc680WriteBufferFull
+        expr: hc680_dmzoned_buffer_ratio > 0.85
+        for: 30m
+        labels: {severity: info}
+        annotations:
+          summary: "{{ $labels.mapper }} write buffer {{ $value | humanizePercentage }} - throughput reduced"
+          description: >-
+            Not a fault. dm-zoned buffers writes in the drive's conventional zones and moves
+            them to sequential zones in the background. Measured on the reference pool: a
+            single writer ran at ~186 MiB/s with an empty buffer and ~56 MiB/s above 85 %;
+            under mixed load the pool fell from 116-143 MB/s to 38-69 MB/s once the buffer
+            was full. It drains at roughly 7 zones/min ONLY while the pool is idle, so a full
+            recovery takes about two hours of quiet. Full during sustained ingest is expected.
+            Full while the pool has been idle for hours means reclaim is not working - check
+            the reclaim worker.
+
+      - alert: Hc680ReclaimWorkerStuck
+        expr: >-
+          min_over_time(hc680_dmzoned_reclaim_dstate[20m]) == 1
+          and on (mapper)
+          sum by (mapper) (increase(hc680_drive_io_sectors_total[20m])) == 0
+          and on (mapper)
+          sum by (mapper) (increase(hc680_drive_ata_requests_total{kind="done"}[20m])) == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.mapper }} dm-zoned reclaim worker hung - in D for 20+ min, drive completed no commands"
+          description: >-
+            The dm-zoned reclaim worker (kworker ... dmz_rwq_dmz-<serial>) was in
+            uninterruptible sleep at every sample for 20 minutes while its drive moved no
+            sectors AND completed no SCSI commands. Busy reclaim also sits in D but keeps
+            moving data; a loop that only sends TEST UNIT READY keeps "done" climbing; both
+            are excluded. Seen twice on kernel 7.2.6 right after the array was reassembled
+            following a power event on the NAS. Evidence is captured automatically in
+            /var/log/hc680-dmz-evidence/ in the guest. If it does not clear: stop the writers
+            (Hyper Backup, rsync pushes) and reboot the guest; the pool reassembles and
+            unlocks by itself.
+
+      - alert: Hc680ZoneWriteWorkerStuck
+        expr: >-
+          min_over_time(hc680_zwplugs_worker_dstate[20m]) == 1
+          and on (drive)
+          increase(hc680_drive_ata_requests_total{kind="done"}[20m]) == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.drive }} zone-write thread hung - writes to {{ $labels.mapper }} are stalled"
+          description: >-
+            The per-disk kthread {{ $labels.drive }}_zwplugs_worker (added in kernel 7.1;
+            zone writes to a rotational zoned disk go through it) has been in D for 20 minutes
+            while the drive completed no commands. Its waits are invisible to the kernel's
+            120 s hung-task detector, hence this rule. Check dmesg for ata errors
+            (port-multiplier error recovery) and /var/log/hc680-dmz-evidence/ in the guest.
+            Recovery: stop the writers, reboot the guest.
+
+      - alert: Hc680MetricsStale
+        expr: (time() - hc680_metrics_timestamp_seconds) > 1200 or absent(hc680_metrics_timestamp_seconds)
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "hc680 metrics not refreshed for 20+ minutes - the pool is unmonitored"
+          description: >-
+            The metrics timer is not running, the script fails, node_exporter rejected the file
+            (check node_textfile_scrape_error), or the guest itself is down. While this fires,
+            the other hc680 alerts work from old values or from no values at all.

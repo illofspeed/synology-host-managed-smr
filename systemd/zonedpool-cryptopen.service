@@ -1,0 +1,23 @@
+# /etc/systemd/system/zonedpool-cryptopen.service
+# Step 3 of the late boot chain: open the LUKS2 container on the assembled RAID with the
+# keyfile. Replaces the systemd-cryptsetup@hc680crypt.service that /etc/crypttab would
+# generate: that generated unit runs EARLY (before cryptsetup.target) and deadlocks with this
+# chain, which starts After=local-fs.target. Therefore the crypttab entry MUST be "noauto".
+# The perf flags (allow-discards, no read/write workqueue) are not given here: they were
+# stored in the LUKS2 header with `cryptsetup open ... --persistent`.
+# See docs/03-guest-storage-stack.md.
+[Unit]
+Description=Open the LUKS container of the hc680 pool (after the RAID is assembled)
+After=zonedpool-mdassemble.service
+Requires=zonedpool-mdassemble.service
+ConditionPathExists=/etc/zonedpool/hc680.key
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=6min
+ExecStart=/bin/sh -c "for t in $(seq 1 60); do [ -b /dev/md/hc680 ] && break; sleep 5; done; /sbin/cryptsetup status hc680crypt >/dev/null 2>&1 || /sbin/cryptsetup open --key-file /etc/zonedpool/hc680.key /dev/md/hc680 hc680crypt"
+ExecStop=-/sbin/cryptsetup close hc680crypt
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,235 @@
+#!/bin/bash
+# zoned-pool-metrics - Prometheus metrics for a pool of host-managed SMR drives built as
+#   each drive -> dm-zoned (dz1..dzN) -> md RAID5 -> LUKS2 -> XFS
+# (docs/03-guest-storage-stack.md). Written for node_exporter's textfile collector and run
+# every 5 minutes from a systemd timer. Alert rules: monitoring/prometheus-rules.yml.
+# Explained in docs/05-operations-monitoring-performance.md.
+#
+# What it exports (every name starts with hc680_, after the pool of the reference build):
+#   - array: mounted?, members expected/active, degraded, mismatch_cnt, sync running and its
+#     progress; filesystem size and usage
+#   - the dm-zoned write buffer per mapper (conventional zones used / total / ratio). This is
+#     the throughput predictor: writes are fast while it has room, and it drains ONLY while
+#     the pool is idle.
+#   - SMART health and temperature when readable; unreadable health has no hc680_smart_ok
+#     sample and hc680_smart_health_known 0 for that host-managed drive
+#   - hang-vs-busy signals: is the dm-zoned reclaim worker, or the per-disk zone-write kthread
+#     (kernel 7.1+), in D state right now, and does the drive still move sectors and complete
+#     commands?
+#   - evidence capture into $EV when D state persists and the drives complete nothing
+#
+# Environment (defaults = the reference build):
+#   HC_TEXTFILE_DIR  node_exporter textfile directory  (/var/lib/prometheus/node-exporter)
+#   HC_MOUNT         pool mount point                   (/srv/hc680)
+#   HC_MD            md kernel name, e.g. md127         (the first md device in /sys/block)
+#
+# Needs: bash, dmsetup, lsblk, ps (procps), smartctl from smartmontools 7 or later (for -j),
+# python3. Run as root (SMART, /proc/<tid>/stack).
+#
+# Assumptions to check on your system:
+#   - The mappers are named dz<something> (dmsetup ls). Other mappers are ignored.
+#   - The dm-zoned reclaim worker of each drive is named dmz_rwq_dmz-<drive serial>_<n>.
+#     That is how the reference drives' dm-zoned labels came out. Check with
+#     `ps -eLo comm | grep dmz_rwq` while the pool is writing. If your names differ, the
+#     *_dstate gauges stay 0 and the stuck-worker alert can never fire: adjust the pattern.
+#
+# Rules learned the hard way:
+#   - The Prometheus text format forbids INTERLEAVING metric families: collect first, then
+#     print each family in one block. A single malformed line makes node_exporter drop the
+#     WHOLE file (node_textfile_scrape_error 1), so after any change check the /metrics
+#     endpoint, not just this file's output.
+#   - sysfs iorequest_cnt / iodone_cnt are HEXADECIMAL (0x...). bash arithmetic reads them
+#     correctly; awk reads them as 0. An ad hoc watch that used awk once reported "no
+#     progress" on drives that were completing thousands of commands per 10 seconds.
+#   - Busy dm-zoned reclaim sits in D state for long periods. D alone is not a hang.
+#
+# Derived from the author's as-built script (array and buffer metrics since 2026-09-24,
+# reclaim metrics and evidence capture since 2026-09-26). Differences from the as-built:
+# HC_MOUNT and HC_MD are configurable; mdstat parsing and the evidence capture use the
+# detected md device instead of the first array / a hard-coded md127; a drive without an
+# iodone_cnt counter counts as 0 instead of aborting the run; SMART JSON is parsed even
+# when smartctl returns health/error bits, preserving failed-health samples; unreadable
+# health has its own per-drive gauge and alert. This exact file
+# was not run on the reference system; run it once by hand and check the output before relying on it.
+set -u
+OUT="${HC_TEXTFILE_DIR:-/var/lib/prometheus/node-exporter}/hc680.prom"
+MNT=${HC_MOUNT:-/srv/hc680}
+MD=${HC_MD:-$(ls /sys/block/ | grep -m1 '^md[0-9]')}
+[ -n "$MD" ] && [ -d "/sys/block/$MD/md" ] || MD=""
+tmp=$(mktemp) || exit 1
+trap 'rm -f "$tmp"' EXIT
+
+{
+  printf '# HELP hc680_array_up 1 if the md array exists and the pool is mounted.\n# TYPE hc680_array_up gauge\n'
+  printf 'hc680_array_up %s\n' "$([ -n "$MD" ] && mountpoint -q "$MNT" && echo 1 || echo 0)"
+
+  if [ -n "$MD" ]; then
+    mdst=$(grep -A3 "^$MD :" /proc/mdstat 2>/dev/null)
+    tot=$(cat "/sys/block/$MD/md/raid_disks" 2>/dev/null || echo 0)
+    act=$(printf '%s\n' "$mdst" | grep -oE '\[[U_]+\]' | head -1 | tr -cd 'U' | wc -c)
+    printf '# HELP hc680_array_disks_total Members the array expects.\n# TYPE hc680_array_disks_total gauge\nhc680_array_disks_total %s\n' "${tot:-0}"
+    printf '# HELP hc680_array_disks_active Members currently up.\n# TYPE hc680_array_disks_active gauge\nhc680_array_disks_active %s\n' "${act:-0}"
+    printf '# HELP hc680_array_degraded 1 if any member is missing.\n# TYPE hc680_array_degraded gauge\nhc680_array_degraded %s\n' "$([ "${act:-0}" -lt "${tot:-0}" ] && echo 1 || echo 0)"
+    printf '# HELP hc680_array_mismatch_cnt Parity mismatches found by the last check/repair.\n# TYPE hc680_array_mismatch_cnt gauge\nhc680_array_mismatch_cnt %s\n' "$(cat "/sys/block/$MD/md/mismatch_cnt" 2>/dev/null || echo 0)"
+    sa=$(cat "/sys/block/$MD/md/sync_action" 2>/dev/null || echo idle)
+    printf '# HELP hc680_array_syncing 1 if a resync/repair/check/recovery is running.\n# TYPE hc680_array_syncing gauge\nhc680_array_syncing %s\n' "$([ "$sa" != idle ] && echo 1 || echo 0)"
+    # a running "repair" is shown as "resync" in /proc/mdstat
+    pct=$(printf '%s\n' "$mdst" | grep -oE '(resync|recovery|check|reshape) *= *[0-9.]+%' | grep -oE '[0-9.]+' | head -1)
+    printf '# HELP hc680_array_sync_percent Progress of the running sync, 0 if idle.\n# TYPE hc680_array_sync_percent gauge\nhc680_array_sync_percent %s\n' "${pct:-0}"
+  fi
+
+  u=$(df -B1 --output=used "$MNT" 2>/dev/null | tail -1 | tr -dc 0-9)
+  s=$(df -B1 --output=size "$MNT" 2>/dev/null | tail -1 | tr -dc 0-9)
+  printf '# HELP hc680_fs_bytes Filesystem size and usage.\n# TYPE hc680_fs_bytes gauge\n'
+  printf 'hc680_fs_bytes{kind="size"} %s\nhc680_fs_bytes{kind="used"} %s\n' "${s:-0}" "${u:-0}"
+} > "$tmp"
+
+# dm-zoned buffer. `dmsetup status dzN` contains "<free>/<total> random": the conventional
+# zones dm-zoned uses as its write buffer (998 per HC680).
+bu=""; bt=""; br=""
+for n in $(dmsetup ls 2>/dev/null | awk '/^dz/{print $1}' | sort); do
+  st=$(dmsetup status "$n" 2>/dev/null) || continue
+  r=$(printf '%s' "$st" | grep -oE '[0-9]+/[0-9]+ random') || continue
+  [ -n "$r" ] || continue
+  free=${r%%/*}; total=${r#*/}; total=${total% random}
+  [ "${total:-0}" -gt 0 ] || continue
+  used=$(( total - free ))
+  bu="$bu$(printf 'hc680_dmzoned_buffer_zones_used{mapper="%s"} %s\n' "$n" "$used")
+"
+  bt="$bt$(printf 'hc680_dmzoned_buffer_zones_total{mapper="%s"} %s\n' "$n" "$total")
+"
+  br="$br$(printf 'hc680_dmzoned_buffer_ratio{mapper="%s"} %s\n' "$n" "$(awk -v a="$used" -v b="$total" 'BEGIN{printf "%.4f", a/b}')")
+"
+done
+if [ -n "$bu" ]; then
+  {
+    printf '# HELP hc680_dmzoned_buffer_zones_used Conventional zones holding buffered writes.\n# TYPE hc680_dmzoned_buffer_zones_used gauge\n%s' "$bu"
+    printf '# HELP hc680_dmzoned_buffer_zones_total Conventional zones available as buffer.\n# TYPE hc680_dmzoned_buffer_zones_total gauge\n%s' "$bt"
+    printf '# HELP hc680_dmzoned_buffer_ratio Buffer occupancy. Above ~0.85 write throughput drops to roughly a third.\n# TYPE hc680_dmzoned_buffer_ratio gauge\n%s' "$br"
+  } >> "$tmp"
+fi
+
+# SMART per host-managed drive, grouped
+sh=""; sa=""; sk=""
+for d in $(lsblk -dno NAME,TYPE | awk '$2=="disk"{print $1}'); do
+  [ "$(cat "/sys/block/$d/queue/zoned" 2>/dev/null)" = host-managed ] || continue
+  smart_rc=0
+  j=$(smartctl -j -H -A "/dev/$d" 2>/dev/null) || smart_rc=$?
+  # Exit status is a bitmask, not a success/failure flag. Bit 3 is failed health;
+  # other bits can coexist with usable JSON. Without bit 3, missing health is unknown.
+  ok=$(printf '%s' "$j" | python3 -c 'import json,sys
+try:
+    passed=json.load(sys.stdin).get("smart_status",{}).get("passed")
+    print(0 if passed is False or int(sys.argv[1]) & 8 else 1 if passed is True else "")
+except Exception: print("")' "$smart_rc" 2>/dev/null)
+  known=0; [ -n "$ok" ] && known=1
+  sk="$sk$(printf 'hc680_smart_health_known{device="%s"} %s\n' "$d" "$known")
+"
+  [ "$known" = 1 ] || continue
+  sh="$sh$(printf 'hc680_smart_ok{device="%s"} %s\n' "$d" "$ok")
+"
+  tc=$(printf '%s' "$j" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("temperature",{}).get("current",0))
+except Exception: print(0)' 2>/dev/null)
+  sa="$sa$(printf 'hc680_smart_temperature_celsius{device="%s"} %s\n' "$d" "${tc:-0}")
+"
+done
+if [ -n "$sk" ]; then
+  printf '# HELP hc680_smart_health_known 1 if SMART overall health could be read, 0 if unknown.\n# TYPE hc680_smart_health_known gauge\n%s' "$sk" >> "$tmp"
+fi
+if [ -n "$sh" ]; then
+  {
+    printf '# HELP hc680_smart_ok SMART overall health passed.\n# TYPE hc680_smart_ok gauge\n%s' "$sh"
+    printf '# HELP hc680_smart_temperature_celsius Drive temperature.\n# TYPE hc680_smart_temperature_celsius gauge\n%s' "$sa"
+  } >> "$tmp"
+fi
+
+# dm-zoned reclaim / zone-write health, per mapper and its physical drive:
+#  - hc680_dmzoned_reclaim_dstate: the dmz_rwq_dmz-<serial> kworker is in D right now
+#  - hc680_zwplugs_worker_dstate: the per-disk <sdX>_zwplugs_worker kthread (blk-zoned,
+#    kernel 7.1+) is in D right now; always 0 on kernels without it
+#  - hc680_drive_io_sectors_total: sectors read/written by the physical drive
+#  - hc680_drive_ata_requests_total{kind=issued|done}: SCSI commands dispatched/completed.
+#    TEST UNIT READY counts too, so a real hang is D with BOTH sectors and "done" frozen;
+#    a reclaim loop that only sends TURs is D with "done" climbing.
+#  - hc680_dmzoned_reclaim_ctxt_switches_total: context switches of the reclaim kworker(s)
+#  - hc680_drive_inflight: requests in flight at the drive
+rd=""; zw=""; io=""; ata=""; cs=""; inf=""; anyd=0
+psout=$(ps -eLo stat=,tid=,comm= 2>/dev/null)
+for n in $(dmsetup ls 2>/dev/null | awk '/^dz/{print $1}' | sort); do
+  drv=$(dmsetup deps -o devname "$n" 2>/dev/null | grep -oE '\([a-z]+\)' | tr -d '()' | head -1)
+  [ -n "$drv" ] && [ -r "/sys/block/$drv/stat" ] || continue
+  ser=$(lsblk -dno SERIAL "/dev/$drv" 2>/dev/null | tr -d ' ')
+  [ -n "$ser" ] || continue
+  d=$(printf '%s\n' "$psout" | awk -v s="dmz_rwq_dmz-$ser" 'index($3,s) && $1 ~ /^D/ {f=1} END{print f+0}')
+  z=$(printf '%s\n' "$psout" | awk -v s="${drv}_zwplugs_worker" '$3==s && $1 ~ /^D/ {f=1} END{print f+0}')
+  [ "$d" = 1 ] || [ "$z" = 1 ] && anyd=1
+  c=0
+  for t in $(printf '%s\n' "$psout" | awk -v s="dmz_rwq_dmz-$ser" 'index($3,s) {print $2}'); do
+    v=$(awk '/^(voluntary|nonvoluntary)_ctxt_switches/{s+=$2} END{print s+0}' "/proc/$t/status" 2>/dev/null); c=$(( c + ${v:-0} ))
+  done
+  set -- $(awk '{print $3, $7}' "/sys/block/$drv/stat")
+  ir=$(( $(cat "/sys/block/$drv/device/iorequest_cnt" 2>/dev/null || echo 0) ))
+  id=$(( $(cat "/sys/block/$drv/device/iodone_cnt" 2>/dev/null || echo 0) ))
+  fl=$(awk '{print $1+$2}' "/sys/block/$drv/inflight" 2>/dev/null)
+  rd="$rd$(printf 'hc680_dmzoned_reclaim_dstate{mapper="%s",drive="%s"} %s\n' "$n" "$drv" "$d")
+"
+  zw="$zw$(printf 'hc680_zwplugs_worker_dstate{mapper="%s",drive="%s"} %s\n' "$n" "$drv" "$z")
+"
+  io="$io$(printf 'hc680_drive_io_sectors_total{mapper="%s",drive="%s",dir="read"} %s\nhc680_drive_io_sectors_total{mapper="%s",drive="%s",dir="write"} %s\n' "$n" "$drv" "$1" "$n" "$drv" "$2")
+"
+  ata="$ata$(printf 'hc680_drive_ata_requests_total{mapper="%s",drive="%s",kind="issued"} %s\nhc680_drive_ata_requests_total{mapper="%s",drive="%s",kind="done"} %s\n' "$n" "$drv" "$ir" "$n" "$drv" "$id")
+"
+  cs="$cs$(printf 'hc680_dmzoned_reclaim_ctxt_switches_total{mapper="%s",drive="%s"} %s\n' "$n" "$drv" "$c")
+"
+  inf="$inf$(printf 'hc680_drive_inflight{mapper="%s",drive="%s"} %s\n' "$n" "$drv" "${fl:-0}")
+"
+done
+if [ -n "$rd" ]; then
+  {
+    printf '# HELP hc680_dmzoned_reclaim_dstate 1 if the dm-zoned reclaim worker of this mapper is in uninterruptible sleep (D) right now.\n# TYPE hc680_dmzoned_reclaim_dstate gauge\n%s' "$rd"
+    printf '# HELP hc680_zwplugs_worker_dstate 1 if the per-disk zone-write-plug kthread is in D right now.\n# TYPE hc680_zwplugs_worker_dstate gauge\n%s' "$zw"
+    printf '# HELP hc680_drive_io_sectors_total Sectors read/written by the physical drive behind the mapper.\n# TYPE hc680_drive_io_sectors_total counter\n%s' "$io"
+    printf '# HELP hc680_drive_ata_requests_total SCSI commands dispatched (issued) and completed (done) on the drive, TEST UNIT READY included.\n# TYPE hc680_drive_ata_requests_total counter\n%s' "$ata"
+    printf '# HELP hc680_dmzoned_reclaim_ctxt_switches_total Context switches of the thread(s) currently running the reclaim work.\n# TYPE hc680_dmzoned_reclaim_ctxt_switches_total counter\n%s' "$cs"
+    printf '# HELP hc680_drive_inflight Requests in flight at the drive.\n# TYPE hc680_drive_inflight gauge\n%s' "$inf"
+  } >> "$tmp"
+fi
+
+# Evidence capture. Fires when a D state is seen on two consecutive runs AND the host-managed
+# drives completed no commands in between (summed iodone_cnt unchanged). Busy reclaim also
+# sits in D, but keeps completing I/O. The sum covers ALL host-managed drives: if one drive
+# hangs while the others keep working, nothing is captured here (the per-mapper alert rule
+# still fires). Keeps the newest 20 files.
+EV=/var/log/hc680-dmz-evidence; ST=/run/hc680-dmz-dstate
+donesum=0
+for s in /sys/block/sd*; do
+  [ "$(cat "$s/queue/zoned" 2>/dev/null)" = host-managed ] || continue
+  v=$(cat "$s/device/iodone_cnt" 2>/dev/null); donesum=$(( donesum + ${v:-0} ))
+done
+if [ "$anyd" = 1 ]; then
+  if [ -f "$ST" ] && [ "$(cat "$ST" 2>/dev/null)" = "$donesum" ]; then
+    mkdir -p "$EV"; f="$EV/$(date +%Y%m%d-%H%M%S).txt"
+    {
+      echo "== $(date -Is) $(uname -r)"
+      printf '%s\n' "$psout" | awk '$1 ~ /^D/'
+      for t in $(printf '%s\n' "$psout" | awk -v md="${MD:-md}" '$1 ~ /^D/ && ($3 ~ /dmz|kcopyd|zwplugs|xfs|kcryptd|dmcrypt/ || index($3, md)) {print $2}'); do
+        echo "--- tid $t $(cat /proc/$t/comm 2>/dev/null) wchan=$(cat /proc/$t/wchan 2>/dev/null)"; cat "/proc/$t/stack" 2>/dev/null
+      done
+      for x in $(dmsetup ls 2>/dev/null | awk '/^dz/{print $1}'); do echo "dmsetup status $x: $(dmsetup status "$x")"; done
+      for s in /sys/block/sd*; do b=$(basename "$s"); [ "$(cat "$s/queue/zoned" 2>/dev/null)" = host-managed ] || continue
+        echo "$b inflight=$(cat "$s/inflight") iorequest=$(cat "$s/device/iorequest_cnt") iodone=$(cat "$s/device/iodone_cnt") ioerr=$(cat "$s/device/ioerr_cnt") stat=$(cat "$s/stat")"
+        [ -r "/sys/kernel/debug/block/$b/zone_wplugs" ] && { echo "zone_wplugs $b:"; head -20 "/sys/kernel/debug/block/$b/zone_wplugs"; }
+      done
+      grep -A3 "^${MD:-md}" /proc/mdstat
+      dmesg | tail -60
+    } > "$f" 2>&1
+    ls -1t "$EV"/*.txt 2>/dev/null | tail -n +21 | xargs -r rm -f
+  fi
+  echo "$donesum" > "$ST"
+else
+  rm -f "$ST"
+fi
+
+printf '# HELP hc680_metrics_timestamp_seconds When these were generated.\n# TYPE hc680_metrics_timestamp_seconds gauge\nhc680_metrics_timestamp_seconds %s\n' "$(date +%s)" >> "$tmp"
+install -m 644 "$tmp" "$OUT"

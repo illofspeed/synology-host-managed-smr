@@ -1,0 +1,21 @@
+# /etc/systemd/system/zonedpool-dmzassemble.service
+# Step 1 of the late boot chain: dm-zoned mappers from /etc/zonedpool/dmzoned.conf.
+# Deliberately After=local-fs.target (NOT Before=local-fs-pre.target): a slow or missing drive
+# must not stall the rest of the boot. See docs/03-guest-storage-stack.md.
+[Unit]
+Description=Assemble dm-zoned devices for the zoned pool
+After=systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+After=local-fs.target
+ConditionPathExists=/etc/zonedpool/dmzoned.conf
+
+[Service]
+# The script waits up to ZP_DMZ_WAIT (default 600 s) per drive for late enumeration.
+TimeoutStartSec=15min
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/zonedpool-dmzassemble
+ExecStop=/bin/true
+
+[Install]
+WantedBy=multi-user.target
