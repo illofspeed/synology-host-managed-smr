@@ -1,0 +1,15 @@
+#!/bin/sh
+# zonedpool-reclaim-kick — keep dm-zoned's idle buffer drain going (workaround, kernel 7.2.6).
+#
+# dm-zoned re-arms its reclaim worker's 10 s idle poll only on the "reclaim not needed" path
+# (drivers/md/dm-zoned-reclaim.c:514 in v7.2.6). After a reclaim pass that ends while the target is
+# busy with more than 30 % free random zones, dmz_schedule_reclaim() does not re-queue the work
+# (:634-639), so once the pool goes idle nothing wakes reclaim and the random-zone buffer stays full.
+# The "reclaim" message re-evaluates dmz_should_reclaim(): it starts reclaim when the target is idle
+# (or free zones are <= 30 %) and does nothing otherwise. Safe to run at any time.
+set -u
+dmsetup ls --target zoned 2>/dev/null | awk '$2 ~ /^\(/ {print $1}' | while read -r t; do
+  dmsetup message "$t" 0 reclaim 2>/dev/null ||
+    logger -t zonedpool-reclaim-kick "reclaim message failed for $t"
+done
+exit 0

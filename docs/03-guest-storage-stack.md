@@ -147,6 +147,9 @@ What is known:
   been seen on 7.2.6, but the other kernels never ran long enough under the same conditions to
   rule them out. The mitigation is monitoring, evidence capture and a reboot
   ([05-operations-monitoring-performance.md](05-operations-monitoring-performance.md)).
+- On 7.2.6, dm-zoned's idle buffer drain does not always restart after a busy period, so the
+  write buffer can stay about two thirds full on an idle pool. Install the reclaim-kick timer
+  ([05, 1.2.1](05-operations-monitoring-performance.md#121-the-idle-drain-can-stall-kernel-726-install-the-reclaim-kick)).
 - Debian enables `xfs_scrub_all.timer` by default. On kernels built with XFS online scrub
   (Debian's 7.1.8 and Zabbly's 7.2.7, for example), it runs a real full-media scan of the
   pool once a month. Ubuntu's 7.2.6 is built without online scrub, so there the timer does
@@ -496,7 +499,8 @@ cat /sys/block/md127/md/mismatch_cnt          # mismatches found and fixed so fa
 What to expect, as measured on this setup:
 
 - On an idle array the pass runs at about 173-205 MB/s. A full pass takes roughly 33-40
-  hours.
+  hours. On the reference pool it took 40.5 hours and found **0 mismatches**, with
+  3.19 TB written into the pool during it.
 - dm-zoned answers reads of never-written regions from its metadata without touching the
   disks, so the drives do almost no physical I/O on those parts.
 - The pass gives way to real I/O. Under heavy writes it dropped to about 10 MB/s, which was

@@ -520,7 +520,9 @@ suggests.
   - After a reboot inside the guest, the encrypted pool was mounted about
     90–100 seconds into boot. A VMM power cycle adds the re-attach on top.
   - A full md `repair` pass is estimated at 33–40 hours, at about
-    175–205 MB/s on an otherwise idle pool.
+    175–205 MB/s on an otherwise idle pool. The reference repair took 40.5
+    hours, with heavy writes running at the same time, and found 0
+    mismatches.
   - Large initial copies slow to about 40–70 MB/s once the dm-zoned buffer is
     full ([7.4](#74-smr-throughput-drops)).
 

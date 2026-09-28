@@ -123,12 +123,21 @@ Hyper Backup seed, a ~3 TB rsync push and an md parity repair at the same time):
 
 The saturated state held for more than an hour with no hang and no errors. The
 md repair backed off to its 10 MB/s floor with 0 mismatches. The buffer drains
-only while the pool is idle.
+only while the pool is idle, and on 7.2.6 the idle drain may need a kick
+([05, 1.2.1](docs/05-operations-monitoring-performance.md#121-the-idle-drain-can-stall-kernel-726-install-the-reclaim-kick)).
+
+**Result of the first real load (2026-09-26 to 09-28):** 3.19 TB of media (667
+files) copied in over about 20 hours at 45–55 MB/s, byte- and file-exact
+against the source, while a Hyper Backup seed and the mandatory md repair ran
+at the same time. The repair finished after 40.5 hours with **0
+mismatches**. No kernel errors on the pool, no stuck reclaim worker, SMART clean
+on all three drives.
 
 | Other measurements | Result |
 |---|---|
 | Hyper Backup alone, kernel 7.2.6 | ~68 MB/s into the pool, drives ~22 % busy |
 | Buffer drain while idle (measured before LUKS was added) | ~7 zones/min per drive, ~2 h from full to empty |
+| Buffer drain after a reclaim kick, with LUKS | ~8 zones/min per drive, ~1.5 h |
 | md repair or resync on an idle pool | 173–205 MB/s; a full pass takes ~33–40 h |
 | LUKS2 aes-xts 512-bit, `cryptsetup benchmark`, one thread | ~950 MiB/s encrypt, ~1020 MiB/s decrypt |
 | Pool mounted after a reboot inside the guest | ~90–100 s into boot |
@@ -147,7 +156,8 @@ only while the pool is idle.
    times right after the array was reassembled following a power event on the
    NAS. Once it needed a guest reboot; once it cleared by itself. No upstream
    report or fix exists. The mitigation is monitoring that tells a hang from
-   busy reclaim, automatic evidence capture, and a reboot.
+   busy reclaim, automatic evidence capture, and a reboot. Separately, 7.2.6's
+   idle buffer drain can stall; a 15-minute reclaim-kick timer works around it.
 4. **It goes against published advice.** Western Digital's zoned storage
    documentation does not recommend dm-zoned, and nobody else was found
    running md RAID on top of it ([07](docs/07-prior-art.md)).
@@ -213,11 +223,13 @@ Read in this order:
 │   │   └── S99zoned-attach.sh             /usr/local/etc/rc.d boot hook: start|stop|restart|status
 │   └── guest/                             runs in the Linux guest, as root
 │       ├── zonedpool-dmzassemble          creates the dm-zoned mappers from by-id at boot
+│       ├── zonedpool-reclaim-kick         keeps dm-zoned's idle buffer drain going (7.2.6)
 │       └── zoned-pool-metrics             node_exporter textfile metrics + hang evidence capture
-├── systemd/                               the late boot chain in the guest
+├── systemd/                               the late boot chain in the guest, plus the kick timer
 │   ├── zonedpool-dmzassemble.service
 │   ├── zonedpool-mdassemble.service
-│   └── zonedpool-cryptopen.service
+│   ├── zonedpool-cryptopen.service
+│   └── zonedpool-reclaim-kick.{service,timer}
 ├── examples/                              guest config files, with placeholders
 │   ├── dmzoned.conf.example               /etc/zonedpool/dmzoned.conf
 │   ├── mdadm.conf.example                 /etc/mdadm/mdadm.conf

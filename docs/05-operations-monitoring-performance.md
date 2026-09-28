@@ -54,7 +54,10 @@ available as this buffer: about 250 GiB per drive. The buffer decides your write
 - **Under load, reclaim runs but cannot keep up, so the buffer keeps filling.** In the stress
   test (1.4) it filled at about 13 to 17 zones per minute per drive.
 - **It only shrinks while the pool is idle.** Measured before LUKS was added: about 7 zones
-  per minute per drive, so about 2 to 2.5 hours from full to empty.
+  per minute per drive, so about 2 to 2.5 hours from full to empty. With LUKS, after a kick
+  (below): about 8 zones per minute per drive, about 1.5 hours.
+- **On 7.2.6 the idle drain does not always start by itself.** See 1.2.1. Install the
+  `zonedpool-reclaim-kick` timer.
 - **Once it is full, throughput drops to roughly a third to a half** and stays there. It does
   not collapse further and nothing fails.
 
@@ -80,6 +83,47 @@ The **first** number is the count of **free** zones. `24/998 random` means 974 o
 buffer zones are in use: the buffer is nearly full. After a fresh format, with the array and
 filesystem just created on top, the reference drives showed `961/998 random` and
 `99560/99562 sequential`. The metrics script in section 2 exports the used ratio per mapper.
+
+#### 1.2.1 The idle drain can stall (kernel 7.2.6): install the reclaim kick
+
+**Observed 2026-09-28:** after a 40-hour md repair ended, the pool was completely idle (no I/O
+on the drives, md or the LUKS device, no reclaim worker running), yet the buffers stayed at
+`310/998 random` free on every drive for hours. Nothing was wrong with the data; the drain
+simply never restarted.
+
+**Why, from the v7.2.6 source** (`drivers/md/dm-zoned-reclaim.c`): the reclaim worker re-arms
+its 10-second idle poll only on the path where it decides reclaim is *not* needed (line 514).
+After a pass that did reclaim, it calls `dmz_schedule_reclaim()` (line 547), which re-queues
+the work only if reclaim is warranted at that instant (lines 634-639): the target idle, or 30 %
+or less of the buffer free. During the repair the targets were busy with about 31 % free, so
+the last pass ended with nothing re-armed. The only other wake-ups are a new write that pushes
+free space to 30 % or less (`dm-zoned-metadata.c` line 2212), a target resume, and the
+`reclaim` message. Result: the buffer can stay about two thirds full indefinitely, and the
+next large copy gets only about 31 % of the buffer (roughly 150 GB of data) before it slows
+down, instead of nearly all of it. It is not dangerous, only slower.
+
+**Workaround:** send the `reclaim` message regularly. It makes dm-zoned re-evaluate: it starts
+reclaim if the target is idle (or 30 % or less is free) and does nothing otherwise, so it is
+safe at any time.
+
+```sh
+dmsetup message dz1 0 reclaim       # one-off, per mapper
+```
+
+The repository ships a timer that does this for every zoned target every 15 minutes:
+
+```sh
+install -m 0755 scripts/guest/zonedpool-reclaim-kick /usr/local/sbin/
+install -m 0644 systemd/zonedpool-reclaim-kick.service systemd/zonedpool-reclaim-kick.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now zonedpool-reclaim-kick.timer
+```
+
+On the reference pool the first kick started reclaim at once on all three drives (about
+35 MB/s read and 36 MB/s written per drive) and emptied the buffers in about 1.5 hours.
+Undo: `systemctl disable --now zonedpool-reclaim-kick.timer` and delete the three files. The
+upstream fix would be to re-arm the idle poll at the end of every pass; as of this writing it
+has not been reported upstream. Whether other kernel versions behave the same is untested.
 
 ### 1.3 Measured throughput
 
@@ -473,6 +517,9 @@ echo idle > /sys/block/md127/md/sync_action        # to stop a running pass
 What to expect:
 
 - A full pass runs at about 173-205 MB/s on an idle pool and takes about 33-40 hours.
+- **Reference result:** the mandatory repair after the build finished on 2026-09-28 with
+  **0 mismatches**, after 40.5 hours (2026-09-26 09:30 to 09-28 02:04), while 3.19 TB of media and a Hyper Backup seed were
+  written into the pool at the same time.
 - It yields to real I/O. Under heavy writes it drops to its minimum speed, 10 MB/s on the
   reference guest (`/sys/block/md127/md/sync_speed_min`, `/proc/sys/dev/raid/speed_limit_min`).
 - dm-zoned answers reads of never-written areas from its metadata, so the drives do almost no
@@ -1156,6 +1203,7 @@ stuck.
 | Old UUIDs after a rebuild or crash | The array or filesystem did not come up | Compare UUIDs (4.1) |
 | Editing `attach.conf` without restarting the watcher | The controller went to the old guest | Restart the watcher (4.4) |
 | Formatting the wrong drive during a replacement | Would destroy a degraded array | Check the serial three times (3.7) |
+| Trusting the idle drain on 7.2.6 | Buffers stayed two thirds full for hours on an idle pool | Install the reclaim-kick timer (1.2.1) |
 
 ## Files
 
@@ -1163,6 +1211,8 @@ stuck.
 |---|---|
 | [scripts/guest/zoned-pool-metrics](../scripts/guest/zoned-pool-metrics) | `/usr/local/sbin/zoned-pool-metrics` (0755), plus the timer in 2.2 |
 | [monitoring/prometheus-rules.yml](../monitoring/prometheus-rules.yml) | a file in your Prometheus rules directory |
+| [scripts/guest/zonedpool-reclaim-kick](../scripts/guest/zonedpool-reclaim-kick) | `/usr/local/sbin/zonedpool-reclaim-kick` (0755) |
+| [systemd/zonedpool-reclaim-kick.service](../systemd/zonedpool-reclaim-kick.service), [.timer](../systemd/zonedpool-reclaim-kick.timer) | `/etc/systemd/system/`, timer enabled (1.2.1) |
 
 ## Other pages
 

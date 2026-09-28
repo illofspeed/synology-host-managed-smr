@@ -1,0 +1,7 @@
+[Unit]
+Description=Kick dm-zoned reclaim so the zone buffer drains while the pool is idle (7.2.6 workaround)
+After=zonedpool-dmzassemble.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zonedpool-reclaim-kick
