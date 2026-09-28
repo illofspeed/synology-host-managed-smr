@@ -495,6 +495,18 @@ suggests.
   for long periods. It is a hang only if the worker is in D **and** the drives
   complete no commands.
 
+### 7.6 DSM loses the expansion unit, fans included
+
+Once the controller is passed through, DSM no longer sees the expansion unit at all. Its Fan
+Speed Mode no longer applies to the unit, and nothing reports the unit's fans or sensors; the
+unit runs on its own default fan behaviour, and the guest has no way to control it either
+(no Linux driver for Synology's expansion-unit management). On the reference NAS, switching
+DSM to Cool mode made no difference to the DX1222's drives. What remains is each drive's own
+SMART temperature, which the monitoring alerts on above 55 C
+([05, section 2.5](05-operations-monitoring-performance.md#25-the-alerts)). Measured with the
+unit's default fans: 40-45 C idle, up to 49 C under continuous writes. Plan for airflow around
+the unit.
+
 ## 8. What you need
 
 - **Backups.** Back up the NAS's own data, because of
