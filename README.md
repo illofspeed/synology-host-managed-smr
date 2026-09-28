@@ -171,7 +171,12 @@ on all three drives.
    after `mdadm --create --assume-clean` (an earlier build had 752 parity
    mismatches); losing the LUKS keyfile and every passphrase. RAID5 is not a
    backup.
-8. **The published scripts are adapted, not the exact as-built files.** The
+8. **DSM loses the expansion unit.** With the controller passed through, DSM
+   no longer sees the DX1222, so its fan-speed setting no longer applies to it
+   and nothing reports the unit's own fans or sensors. Only the drives' SMART
+   temperatures remain, and the monitoring alerts on those
+   ([02](docs/02-synology-controller-passthrough.md#how-it-works)).
+9. **The published scripts are adapted, not the exact as-built files.** The
    NAS watcher, its boot hook and the metrics script were made configurable
    and gained extra checks. The watcher and hook were exercised against a
    simulated sysfs tree, not on a Synology, and the published metrics script

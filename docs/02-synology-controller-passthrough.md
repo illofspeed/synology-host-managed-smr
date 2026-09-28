@@ -117,6 +117,20 @@ Why it is built this way:
 - **The watcher never detaches.** Taking the controller away from a guest is always a
   deliberate manual step.
 
+> [!IMPORTANT]
+> **DSM loses the whole expansion unit, fans included.** Once the controller belongs to the
+> guest, DSM no longer sees the DX1222 at all: it is gone from Storage Manager and Info
+> Center, and **DSM's Fan Speed Mode no longer reaches it**. Observed on the reference NAS:
+> switching DSM from Quiet to Cool mode left the DX1222's drives 2-3 C *warmer* half an hour
+> later, under an unchanged load. The unit runs on its own default fan behaviour. The guest
+> cannot take over either: the drives hang off four Marvell 88SM9705 port multipliers, Linux
+> has no driver for Synology's expansion-unit management, and no fan or temperature sensor of
+> the unit appears in the guest. What you still have is each drive's own temperature from
+> SMART, which the monitoring alerts on (`Hc680DriveHot`,
+> [05, section 2.5](05-operations-monitoring-performance.md#25-the-alerts)). Measured with
+> the unit's default fans: HC680s at 40-45 C idle, other drives in the unit at 45-49 C while
+> written continuously at about 170 MB/s. Give the unit good airflow.
+
 > [!CAUTION]
 > **Rules that are never broken:**
 >
