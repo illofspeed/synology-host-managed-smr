@@ -498,14 +498,33 @@ suggests.
 ### 7.6 DSM loses the expansion unit, fans included
 
 Once the controller is passed through, DSM no longer sees the expansion unit at all. Its Fan
-Speed Mode no longer applies to the unit, and nothing reports the unit's fans or sensors; the
-unit runs on its own default fan behaviour, and the guest has no way to control it either
-(no Linux driver for Synology's expansion-unit management). On the reference NAS, switching
-DSM to Cool mode made no difference to the DX1222's drives. What remains is each drive's own
-SMART temperature, which the monitoring alerts on above 55 C
+Speed Mode no longer applies to the unit, and nothing reports the unit's fans or sensors.
+
+What DSM's own log (`/var/log/scemd.log`) shows on the reference NAS, at two boots:
+
+```text
+ebox_hotplug.c:171 EUnit plugin
+fan_config_get.c:51 Fan Table HW Version: Synology-DX1222
+fan_config_get.c:65 Type: EBOX Fan Mode: LOW
+ebox_hotplug.c:209 EUnit plugout          # about 2 min later, when the watcher takes the controller
+```
+
+So DSM sets the unit's fan level once at boot, from its DX1222 fan table (by disk
+temperature: low below 48 C, middle from 48 C, full from 55 C; the same table in every Fan
+Speed Mode), and then loses the unit. Later Fan Speed Mode changes are logged for the NAS's
+internal fans only. Nothing sets the unit's level afterwards, so it presumably keeps the one
+from boot, which will be LOW with cool drives.
+
+The guest cannot take over either. Synology's GPL kernel source reaches the unit through
+vendor GPIO registers of its port multipliers (`syno_pm_gpio`), and the fan command itself
+is not in the published source. Doing it from Linux would need a custom kernel module and a
+reverse-engineered command on the same channel that carries the unit's power control. That is
+not worth the risk.
+
+What remains is each drive's own SMART temperature, which the monitoring alerts on above 55 C
 ([05, section 2.5](05-operations-monitoring-performance.md#25-the-alerts)). Measured with the
-unit's default fans: 40-45 C idle, up to 49 C under continuous writes. Plan for airflow around
-the unit.
+unit left at its boot level: 40-45 C idle, up to 49 C under continuous writes. Switching DSM
+to Cool mode made no difference to the DX1222's drives. Plan for airflow around the unit.
 
 ## 8. What you need
 

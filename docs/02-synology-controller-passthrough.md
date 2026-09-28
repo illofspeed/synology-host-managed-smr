@@ -90,8 +90,9 @@ DSM boot
        └─ synology-zoned-attach.sh watch          (loop, every 15 s)
             ├─ is the configured guest running?                 no  -> wait
             ├─ model census: which 1b4b:9235 has exactly N zoned
-            │  drives and no DSM drive behind it?               (else: the recorded address)
-            ├─ address protected / wrong ID / no IOMMU group?   yes -> refuse, log
+            │  drives and no DSM drive behind it?               (none: the recorded address,
+            │                                                    only if still on vfio-pci)
+            ├─ protected / wrong ID / not alone in IOMMU group?  yes -> refuse, log
             ├─ already attached to the guest?                   yes -> nothing to do
             ├─ unbind from ahci, bind to vfio-pci (by address, never by ID)
             └─ virsh attach-device <guest> hostdev.xml --live
@@ -224,9 +225,9 @@ sudo -i
 
 ## Step 2 — Create the VMM guest
 
-The author's guest runs Debian 13 with OpenMediaVault 8 on 4 vCPUs. Installing the guest and
-OpenMediaVault is covered in
-[04-openmediavault-and-synology-integration.md](04-openmediavault-and-synology-integration.md).
+The author's guest runs Debian 13 with OpenMediaVault 8 on 4 vCPUs. Install Debian 13, then
+OpenMediaVault 8 with the official procedure linked in
+[04, section 1](04-openmediavault-and-synology-integration.md#1-before-you-start).
 Choosing its kernel is covered in [03](03-guest-storage-stack.md). On the NAS side, this is
 what matters:
 
@@ -675,7 +676,8 @@ Proxmox VE guest inside VMM.
 ## Disarming and removing
 
 ```sh
-# Disarm: every pass becomes a no-op at once, without restarting anything
+# Disarm: from the next pass on, nothing is attached and the optional nested-virtualization
+# reload does not run. A pass already in progress finishes; stop the watcher before hardware work.
 rm /volume1/zoned-attach/attach.enable
 
 # Stop the watcher and do not start it at the next boot
@@ -702,8 +704,10 @@ update, check that the hook is still there and that the watcher is running.
 | `watcher STILL running after 60s` | The wall-clock stop deadline expired (plus scan overhead); restart was aborted | Run `/usr/local/etc/rc.d/S99zoned-attach.sh status` every few seconds until `watcher NOT running`, then `start` and check `status` again. It prints the PIDs; see the timeout procedure above for a hung child. Do not remove `attach.lock` by hand. |
 | `another start/stop/restart or manual once is running` (system log; `attach.log` for `once`), or a lifecycle-lock recovery error | Another call holds `/tmp/zoned-attach-hook.lock`, or its owner record is incomplete, invalid or names a reused PID | Wait for a live call. A dead owner's lock is recovered automatically on the next call. For a persistent refusal, use [Recovering a stale lifecycle lock](#recovering-a-stale-lifecycle-lock) to check processes, remove the owner record and empty lock directory, and retry. |
 | `no usable controller (census empty and recorded address invalid)` | The guest is running, but no controller has exactly `ZONED_COUNT` zoned drives behind it, and there is no valid recorded address | Run `census`. Check the drive count, `ZONED_MODEL` and the expansion unit's power and cable. |
-| `REFUSE <addr>: a DSM drive model is behind it` | A controller of the configured type has a DSM drive behind it | If it is one of DSM's controllers, add it to `PROTECT_PCI_HARD`. If it is the expansion unit, take the DSM drive out: this unit may hold zoned drives only. |
-| `REFUSE: 2 controllers match the census - ambiguous` | Two controllers qualify | Make the config specific enough, or remove the drives from one of them. Until then the watcher uses only an address it recorded earlier, if that address still passes every check. |
+| `REFUSE: census empty; recorded address is not already bound to vfio-pci` | No controller matches the census, and the controller recorded earlier is back on `ahci` (typically after a NAS reboot with a drive missing or replaced) | The watcher unbinds a controller from DSM only after a fresh census match. Fix `ZONED_COUNT` / `ZONED_MODEL` to the drives actually present, check with `census`, restart the watcher. |
+| `REFUSE: <addr> is not alone in its IOMMU group` | Another device shares the controller's IOMMU group ([01, section 4, item 4](01-requirements-and-risks.md#4-hard-requirements)) | Passing the controller through would take the other device from DSM too. This NAS/slot combination is not suitable. |
+| `REFUSE <addr>: a DSM drive model is behind it` | A controller of the configured type has a DSM drive behind it | If it is one of DSM's controllers, add it to `PROTECT_PCI_HARD`. If it is the expansion unit, take the DSM drive out: this unit may hold zoned drives only. That includes a spare DSM-model drive parked there for a burn-in. |
+| `REFUSE: 2 controllers match the census - ambiguous` | Two controllers qualify | Make the config specific enough, or remove the drives from one of them. Until then the watcher attaches nothing. It does not fall back to a recorded address. |
 | `vfio-pci driver not loaded` | `/sys/bus/pci/drivers/vfio-pci` is missing | The script does not load modules. On the tested NAS the bind worked with VMM running. Check `grep vfio /proc/modules` and that VMM is running. |
 | `vfio bind FAILED` | The controller did not end up on `vfio-pci` | Check `readlink /sys/bus/pci/devices/<addr>/driver` and the IOMMU group |
 | `attach FAILED` on every pass | libvirt refused the attach | Run the attach by hand to see the error: `/usr/local/bin/virsh attach-device <GUEST_DOMAIN_UUID> /volume1/zoned-attach/hostdev.xml --live`. One possible cause: the controller is still attached to another running guest. |
@@ -721,6 +725,11 @@ made configurable. These parts are new and have **not** run on the author's NAS:
 - Checks that the controller has an IOMMU group, that `vfio-pci` is loaded, and that no DSM
   drive sits behind a recorded address.
 - The refusal when more than one controller matches.
+- The recorded-address fallback only for a controller that is still on `vfio-pci`, and never
+  after an ambiguous census; the check that the controller is alone in its IOMMU group; the
+  nested-virtualization reload only while armed. These three came from an independent
+  review in 2026-09. Before it, the watcher used the recorded address whenever the census
+  came up empty, even right after refusing that very controller.
 - The read-only `census` mode.
 - Exiting cleanly (and releasing the lock) when stopped in the middle of a pass.
 - The boot hook is a rewrite. It keeps the as-built hook's behaviour (wait up to 60 × 5 s

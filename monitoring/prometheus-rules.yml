@@ -92,10 +92,10 @@ groups:
       - alert: Hc680ReclaimWorkerStuck
         expr: >-
           min_over_time(hc680_dmzoned_reclaim_dstate[20m]) == 1
-          and on (mapper)
-          sum by (mapper) (increase(hc680_drive_io_sectors_total[20m])) == 0
-          and on (mapper)
-          sum by (mapper) (increase(hc680_drive_ata_requests_total{kind="done"}[20m])) == 0
+          and on (job, instance, mapper, drive)
+          sum by (job, instance, mapper, drive) (increase(hc680_drive_io_sectors_total[20m])) == 0
+          and on (job, instance, mapper, drive)
+          sum by (job, instance, mapper, drive) (increase(hc680_drive_ata_requests_total{kind="done"}[20m])) == 0
         for: 5m
         labels: {severity: critical}
         annotations:
@@ -114,7 +114,7 @@ groups:
       - alert: Hc680ZoneWriteWorkerStuck
         expr: >-
           min_over_time(hc680_zwplugs_worker_dstate[20m]) == 1
-          and on (drive)
+          and on (job, instance, mapper, drive)
           increase(hc680_drive_ata_requests_total{kind="done"}[20m]) == 0
         for: 5m
         labels: {severity: critical}
@@ -129,7 +129,10 @@ groups:
             Recovery: stop the writers, reboot the guest.
 
       - alert: Hc680MetricsStale
-        expr: (time() - hc680_metrics_timestamp_seconds) > 1200 or absent(hc680_metrics_timestamp_seconds)
+        expr: >-
+          (time() - hc680_metrics_timestamp_seconds{job="zoned-pool-guest"}) > 1200
+          or (up{job="zoned-pool-guest"} unless on (job, instance)
+          hc680_metrics_timestamp_seconds{job="zoned-pool-guest"})
         for: 10m
         labels: {severity: warning}
         annotations:

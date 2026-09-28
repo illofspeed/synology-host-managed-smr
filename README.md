@@ -133,6 +133,16 @@ at the same time. The repair finished after 40.5 hours with **0
 mismatches**. No kernel errors on the pool, no stuck reclaim worker, SMART clean
 on all three drives.
 
+**Independent reproduction (2026-09-28):** another agent rebuilt the guest side from
+nothing, following only these docs, on three emulated host-managed drives (file-backed
+ZBC with conventional and sequential zones, 32 GiB each). The whole chain came up
+unattended after reboots, the repair ended at 0 mismatches, the buffer filled and
+drained after a reclaim kick, and NFS and rsync worked from another host. Its findings
+(a missing OMV install step, a duplicate fstab entry, two recovery commands that did
+nothing, a watcher fallback that could skip the census, metric names failing
+`promtool` lint) are fixed in this version. The emulation does not cover the NAS side,
+real SATA drives or their timing.
+
 | Other measurements | Result |
 |---|---|
 | Hyper Backup alone, kernel 7.2.6 | ~68 MB/s into the pool, drives ~22 % busy |

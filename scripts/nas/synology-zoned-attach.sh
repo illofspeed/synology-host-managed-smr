@@ -163,6 +163,11 @@ valid_addr(){ a=$1
   [ "$(cat "$PCI/$a/vendor" 2>/dev/null)" = "$CTRL_VENDOR" ] || { log "REFUSE: $a wrong vendor"; return 1; }
   [ "$(cat "$PCI/$a/device" 2>/dev/null)" = "$CTRL_DEVICE" ] || { log "REFUSE: $a wrong device"; return 1; }
   [ -e "$PCI/$a/iommu_group" ] || { log "REFUSE: $a has no IOMMU group"; return 1; }
+  set -- "$PCI/$a/iommu_group/devices/"*
+  if [ "$#" -ne 1 ] || [ "${1##*/}" != "$a" ]; then
+    log "REFUSE: $a is not alone in its IOMMU group"
+    return 1
+  fi
   dsm_drive_behind "$a" && { log "REFUSE: $a has a DSM drive model behind it"; return 1; }
   return 0; }
 
@@ -181,7 +186,10 @@ find_ctrl(){ found=""; hits=0
     done
     [ "$n" = "$ZONED_COUNT" ] && { found="$a"; hits=$((hits+1)); }
   done
-  [ "$hits" -gt 1 ] && { log "REFUSE: $hits controllers match the census - ambiguous"; found=""; }
+  if [ "$hits" -gt 1 ]; then
+    log "REFUSE: $hits controllers match the census - ambiguous"
+    return 1
+  fi
   echo "$found"; }
 
 # Minimal hostdev XML: ONLY the host-side <source>. A <hostdev> block dumped from a running
@@ -211,7 +219,10 @@ bind_vfio(){ a=$1; D=$PCI/$a
 # Optional, Intel only: expose VMX to guests (DSM's kvm_intel defaults to nested=0, the
 # parameter is read-only at runtime and DSM has no /etc/modprobe.d). Reloads the module
 # only while NO guest is running, i.e. in practice at NAS boot before VMM starts guests.
-maybe_nested(){ [ "$WANT_NESTED" = 1 ] || return 0
+maybe_nested(){
+  [ -f "$ENABLE" ] || return 0
+  [ "$WANT_NESTED" = 1 ] || return 0
+  preflight || return 1
   [ -r /sys/module/kvm_intel/parameters/nested ] || return 0
   [ "$(cat /sys/module/kvm_intel/parameters/nested)" = Y ] && return 0
   [ "$(awk '$1=="kvm_intel"{print $3}' /proc/modules)" = 0 ] || { log "nested: kvm_intel busy, skipping"; return 0; }
@@ -229,12 +240,17 @@ once(){ [ -f "$ENABLE" ] || return 0
   trap 'exit 130' INT; trap 'exit 143' TERM                # exit (and drop the lock) on kill
   st=$($VIRSH domstate "$DOM" 2>/dev/null)
   if [ "$st" = running ]; then
-    a=$(find_ctrl)
-    if [ -n "$a" ]; then
+    if ! a=$(find_ctrl); then
+      a=""
+    elif [ -n "$a" ]; then
       [ "$a" = "$(cat "$STATE" 2>/dev/null)" ] || echo "$a" >"$STATE" 2>/dev/null \
         || log "WARN: could not persist state for $a"
     else
       a=$(cat "$STATE" 2>/dev/null)
+      if [ -z "$a" ] || [ "$(cur_driver "$a")" != vfio-pci ]; then
+        log "REFUSE: census empty; recorded address is not already bound to vfio-pci"
+        a=""
+      fi
     fi
     if valid_addr "$a"; then
       if ! is_attached "$a"; then

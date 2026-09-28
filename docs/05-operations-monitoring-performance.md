@@ -394,8 +394,11 @@ Notes:
   boot. If the drives are late, the pool can be reported down for a few minutes and the alert
   may fire briefly. Raise `for:` if that bothers you.
 - **`Hc680MetricsStale` covers the guest being down.** When node_exporter cannot be scraped,
-  the `hc680_` series disappear. `Hc680PoolDown` then cannot fire, but the `absent(...)` part
-  of `Hc680MetricsStale` does.
+  the `hc680_` series disappear. `Hc680PoolDown` then cannot fire, but `Hc680MetricsStale`
+  does: its second half fires for every target of the `zoned-pool-guest` job whose `up` series
+  exists without a matching `hc680_metrics_timestamp_seconds`. It is per target, so with
+  several guests one healthy guest does not hide a missing one. Keep the job name in the rule
+  and in the scrape config the same.
 - **`Hc680ParityMismatches` stays on after the initial repair.** md keeps the count from the
   last `check` or `repair` until the next one starts. After the repair that fixed the
   mismatches, the count stays until you run a `check`.
@@ -419,10 +422,10 @@ more minutes:
 
 ```
   min_over_time(hc680_dmzoned_reclaim_dstate[20m]) == 1        # in D at every sample
-and on (mapper)
-  sum by (mapper) (increase(hc680_drive_io_sectors_total[20m])) == 0     # no data moved
-and on (mapper)
-  sum by (mapper) (increase(hc680_drive_ata_requests_total{kind="done"}[20m])) == 0
+and on (job, instance, mapper, drive)
+  sum by (job, instance, mapper, drive) (increase(hc680_drive_io_sectors_total[20m])) == 0     # no data moved
+and on (job, instance, mapper, drive)
+  sum by (job, instance, mapper, drive) (increase(hc680_drive_ata_requests_total{kind="done"}[20m])) == 0
                                                                 # no command completed
 ```
 
@@ -765,8 +768,11 @@ wrong target is a **surviving member**.
    was correlated with ([01, 7.1](01-requirements-and-risks.md#71-nas-kernel-panic-in-dsms-own-storage-driver)).
 
    On the NAS: while a drive is missing, or if the new drive is a different model, the
-   watcher's model census no longer matches (`ZONED_COUNT`, `ZONED_MODEL`). It then falls back
-   to the controller address it recorded earlier. If you change the config, restart the
+   watcher's model census no longer matches (`ZONED_COUNT`, `ZONED_MODEL`). While the
+   controller is still on `vfio-pci` (attached earlier), the watcher keeps using the address it
+   recorded. After a NAS reboot the controller is back on `ahci`, and the watcher refuses to
+   take it from DSM without a matching census: set `ZONED_COUNT` / `ZONED_MODEL` to the drives
+   actually present. If you change the config, restart the
    watcher ([02](02-synology-controller-passthrough.md#after-editing-the-config-restart-the-watcher)).
 
 5. **Identify the new drive** in the guest, as in
@@ -887,16 +893,29 @@ wrong.
 
    > **Why compare UUIDs:** after a rebuild of the array, and again after the NAS crash
    > (4.5), `mdadm.conf` still held the old array's UUID. `mdadm --assemble --scan` then finds
-   > nothing to assemble. Fix the `ARRAY` line (`mdadm --detail --scan` prints the right
-   > one) and run `update-initramfs -u`.
+   > nothing to assemble. Read the right line from the members, not from the kernel
+   > (`mdadm --detail --scan` only lists arrays that are running):
+   >
+   > ```sh
+   > mdadm --examine /dev/mapper/dz1 /dev/mapper/dz2 /dev/mapper/dz3 | grep 'Array UUID'   # all the same?
+   > mdadm --examine --scan /dev/mapper/dz1 /dev/mapper/dz2 /dev/mapper/dz3
+   > ```
+   >
+   > Replace only this pool's `ARRAY` line in `/etc/mdadm/mdadm.conf` with that output and run
+   > `update-initramfs -u`.
 
    If `/proc/mdstat` shows `md127 : inactive ...`, the array was started incomplete. Once
-   all mappers exist, release it and let the unit assemble it again:
+   all three mappers exist and carry the pool's Array UUID (above), release it and assemble
+   it explicitly. `systemctl start zonedpool-mdassemble` alone may do nothing: the oneshot
+   unit is still `active (exited)` from its earlier run.
 
    ```sh
-   mdadm --stop /dev/md127                         # only for an INACTIVE array
-   systemctl start zonedpool-mdassemble
+   mdadm --stop /dev/md127                         # only for an INACTIVE array, never a mounted one
+   mdadm --assemble /dev/md/hc680 /dev/mapper/dz1 /dev/mapper/dz2 /dev/mapper/dz3
+   cat /proc/mdstat                                # expect [3/3] [UUU]
    ```
+
+   Then continue with the LUKS layer (`systemctl restart zonedpool-cryptopen`) and the mount.
 
    If the array runs degraded (`[UU_]`), see [3.7](#37-replacing-a-drive-untested-outline),
    step 1.
@@ -1098,7 +1117,7 @@ hit or designed for:
 | `attach.conf` was edited, but the watcher still runs with the old values | `/usr/local/etc/rc.d/S99zoned-attach.sh restart`. This cost the author two controller moves. |
 | The watcher did not start at NAS boot | Look for `zoned-attach` in the system log, then `S99zoned-attach.sh start`. |
 | The guest was re-created, so its domain UUID changed | Put the new UUID in `DOM=`, restart the watcher. |
-| A drive died or was added, so the census no longer matches | The watcher falls back to the recorded address. If there is none, fix `ZONED_COUNT` / `ZONED_MODEL` and restart the watcher. |
+| A drive died or was added, so the census no longer matches | Until the next NAS reboot the watcher keeps using the recorded address (the controller is still on `vfio-pci`). After a reboot it refuses; fix `ZONED_COUNT` / `ZONED_MODEL` and restart the watcher. |
 | The guest is not running | Start it in VMM. The watcher attaches within about 15 s of `running`. |
 
 DSM 7 has no `pgrep`. Both published `status` commands instead match the exact shell,

@@ -56,7 +56,7 @@ OUT="${HC_TEXTFILE_DIR:-/var/lib/prometheus/node-exporter}/hc680.prom"
 MNT=${HC_MOUNT:-/srv/hc680}
 MD=${HC_MD:-$(ls /sys/block/ | grep -m1 '^md[0-9]')}
 [ -n "$MD" ] && [ -d "/sys/block/$MD/md" ] || MD=""
-tmp=$(mktemp) || exit 1
+tmp=$(mktemp "${OUT%/*}/.hc680.prom.XXXXXX") || exit 1
 trap 'rm -f "$tmp"' EXIT
 
 {
@@ -67,7 +67,7 @@ trap 'rm -f "$tmp"' EXIT
     mdst=$(grep -A3 "^$MD :" /proc/mdstat 2>/dev/null)
     tot=$(cat "/sys/block/$MD/md/raid_disks" 2>/dev/null || echo 0)
     act=$(printf '%s\n' "$mdst" | grep -oE '\[[U_]+\]' | head -1 | tr -cd 'U' | wc -c)
-    printf '# HELP hc680_array_disks_total Members the array expects.\n# TYPE hc680_array_disks_total gauge\nhc680_array_disks_total %s\n' "${tot:-0}"
+    printf '# HELP hc680_array_disks_expected Members the array expects.\n# TYPE hc680_array_disks_expected gauge\nhc680_array_disks_expected %s\n' "${tot:-0}"
     printf '# HELP hc680_array_disks_active Members currently up.\n# TYPE hc680_array_disks_active gauge\nhc680_array_disks_active %s\n' "${act:-0}"
     printf '# HELP hc680_array_degraded 1 if any member is missing.\n# TYPE hc680_array_degraded gauge\nhc680_array_degraded %s\n' "$([ "${act:-0}" -lt "${tot:-0}" ] && echo 1 || echo 0)"
     printf '# HELP hc680_array_mismatch_cnt Parity mismatches found by the last check/repair.\n# TYPE hc680_array_mismatch_cnt gauge\nhc680_array_mismatch_cnt %s\n' "$(cat "/sys/block/$MD/md/mismatch_cnt" 2>/dev/null || echo 0)"
@@ -78,8 +78,11 @@ trap 'rm -f "$tmp"' EXIT
     printf '# HELP hc680_array_sync_percent Progress of the running sync, 0 if idle.\n# TYPE hc680_array_sync_percent gauge\nhc680_array_sync_percent %s\n' "${pct:-0}"
   fi
 
-  u=$(df -B1 --output=used "$MNT" 2>/dev/null | tail -1 | tr -dc 0-9)
-  s=$(df -B1 --output=size "$MNT" 2>/dev/null | tail -1 | tr -dc 0-9)
+  u=0; s=0
+  if mountpoint -q "$MNT"; then
+    u=$(df -B1 --output=used "$MNT" 2>/dev/null | tail -1 | tr -dc 0-9)
+    s=$(df -B1 --output=size "$MNT" 2>/dev/null | tail -1 | tr -dc 0-9)
+  fi
   printf '# HELP hc680_fs_bytes Filesystem size and usage.\n# TYPE hc680_fs_bytes gauge\n'
   printf 'hc680_fs_bytes{kind="size"} %s\nhc680_fs_bytes{kind="used"} %s\n' "${s:-0}" "${u:-0}"
 } > "$tmp"
@@ -96,7 +99,7 @@ for n in $(dmsetup ls 2>/dev/null | awk '/^dz/{print $1}' | sort); do
   used=$(( total - free ))
   bu="$bu$(printf 'hc680_dmzoned_buffer_zones_used{mapper="%s"} %s\n' "$n" "$used")
 "
-  bt="$bt$(printf 'hc680_dmzoned_buffer_zones_total{mapper="%s"} %s\n' "$n" "$total")
+  bt="$bt$(printf 'hc680_dmzoned_buffer_zones_capacity{mapper="%s"} %s\n' "$n" "$total")
 "
   br="$br$(printf 'hc680_dmzoned_buffer_ratio{mapper="%s"} %s\n' "$n" "$(awk -v a="$used" -v b="$total" 'BEGIN{printf "%.4f", a/b}')")
 "
@@ -104,7 +107,7 @@ done
 if [ -n "$bu" ]; then
   {
     printf '# HELP hc680_dmzoned_buffer_zones_used Conventional zones holding buffered writes.\n# TYPE hc680_dmzoned_buffer_zones_used gauge\n%s' "$bu"
-    printf '# HELP hc680_dmzoned_buffer_zones_total Conventional zones available as buffer.\n# TYPE hc680_dmzoned_buffer_zones_total gauge\n%s' "$bt"
+    printf '# HELP hc680_dmzoned_buffer_zones_capacity Conventional zones available as buffer.\n# TYPE hc680_dmzoned_buffer_zones_capacity gauge\n%s' "$bt"
     printf '# HELP hc680_dmzoned_buffer_ratio Buffer occupancy. Above ~0.85 write throughput drops to roughly a third.\n# TYPE hc680_dmzoned_buffer_ratio gauge\n%s' "$br"
   } >> "$tmp"
 fi
@@ -128,11 +131,17 @@ except Exception: print("")' "$smart_rc" 2>/dev/null)
   [ "$known" = 1 ] || continue
   sh="$sh$(printf 'hc680_smart_ok{device="%s"} %s\n' "$d" "$ok")
 "
-  tc=$(printf '%s' "$j" | python3 -c 'import json,sys
-try: print(json.load(sys.stdin).get("temperature",{}).get("current",0))
-except Exception: print(0)' 2>/dev/null)
-  sa="$sa$(printf 'hc680_smart_temperature_celsius{device="%s"} %s\n' "$d" "${tc:-0}")
+  tc=$(printf '%s' "$j" | python3 -c 'import json,math,sys
+try:
+    value=json.load(sys.stdin).get("temperature",{}).get("current")
+    if type(value) in (int,float) and math.isfinite(value):
+        print(value)
+except Exception:
+    pass' 2>/dev/null)
+  if [ -n "$tc" ]; then
+    sa="$sa$(printf 'hc680_smart_temperature_celsius{device="%s"} %s\n' "$d" "$tc")
 "
+  fi
 done
 if [ -n "$sk" ]; then
   printf '# HELP hc680_smart_health_known 1 if SMART overall health could be read, 0 if unknown.\n# TYPE hc680_smart_health_known gauge\n%s' "$sk" >> "$tmp"
@@ -232,4 +241,4 @@ else
 fi
 
 printf '# HELP hc680_metrics_timestamp_seconds When these were generated.\n# TYPE hc680_metrics_timestamp_seconds gauge\nhc680_metrics_timestamp_seconds %s\n' "$(date +%s)" >> "$tmp"
-install -m 644 "$tmp" "$OUT"
+chmod 0644 "$tmp" && mv -f -- "$tmp" "$OUT"

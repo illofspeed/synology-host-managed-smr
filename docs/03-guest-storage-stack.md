@@ -172,13 +172,22 @@ wget "$base/CHECKSUMS" "$base/CHECKSUMS.gpg" \
   "$base/linux-modules-7.2.6-070206-generic_7.2.6-070206.202609141300_amd64.deb"
 
 # Verify the signature on CHECKSUMS, then the packages against it.
-# Compare the fingerprint with https://wiki.ubuntu.com/Kernel/MainlineBuilds
+# The key's user ID is "Kernel PPA <kernel-ppa@canonical.com>" (see note below)
 gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys 60AA7B6F30434AE68E569963E50C6A0917C622B0
 gpg --verify CHECKSUMS.gpg CHECKSUMS
 grep -E '^[0-9a-f]{64} ' CHECKSUMS | sha256sum --check --ignore-missing
 ```
 
-Continue only if you get `Good signature` and both `.deb` files report `OK`. Then install:
+Continue only if you get `Good signature` and both `.deb` files report `OK`.
+
+> **The fingerprint has no independent reference right now.** The page that used to list it,
+> <https://wiki.ubuntu.com/Kernel/MainlineBuilds> (still linked from the mainline directory),
+> returned 404 on 2026-09-28. A `Good signature` from a key fetched from a keyserver proves
+> the files match that key, not who owns it. Without an official page to compare against,
+> you are trusting the fingerprint printed here. If you find a current official reference,
+> check the fingerprint against it.
+
+Then install:
 
 ```sh
 apt install wireless-regdb
@@ -334,6 +343,14 @@ script does it from a config file.
 **On a rebuild, keep your existing `/etc/zonedpool/dmzoned.conf`:** reformatting does not
 change the by-id names. If the script and unit are already installed, skip the installation,
 `cp` and editor lines below and run only `systemctl enable --now zonedpool-dmzassemble.service`.
+
+The paths below are relative to your checkout of this repository. Step 2 left the shell in
+`/root/kernel-7.2.6`; go back first (adjust the path to where you cloned it):
+
+```sh
+cd /root/synology-host-managed-smr
+test -f examples/dmzoned.conf.example && echo ok
+```
 
 ```sh
 mkdir -p /etc/zonedpool
@@ -766,7 +783,9 @@ This is the as-built line
 `# <<< [openmediavault]` and rewrites it. Either register the filesystem in OMV with these
 options in its `opts` field, which is what the as-built guest does and what OMV's shared
 folders need, or write the line by hand outside OMV's block. A lab test confirmed that OMV
-leaves hand-written lines alone. The details are in
+leaves hand-written lines alone. That also means OMV does not remove your hand-written line
+when you register the filesystem later: delete it then
+([04, section 3b](04-openmediavault-and-synology-integration.md#3b-create-the-mount-entry)). The details are in
 [04-openmediavault-and-synology-integration.md](04-openmediavault-and-synology-integration.md).
 
 Mount it now:

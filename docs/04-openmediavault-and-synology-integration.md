@@ -82,9 +82,13 @@ Placeholders used below:
 - The pool is built and has passed both reboot tests in
   [03-guest-storage-stack.md, Step 11](03-guest-storage-stack.md#step-11---enable-the-chain-and-test-a-full-reboot).
 - The LUKS container is open, and `findmnt /srv/hc680` shows `/dev/mapper/hc680crypt`. If
-  you mounted the pool by hand, unmount it before section 3 (`umount /srv/hc680`), so that
-  OMV's mount is the only one.
-- OMV 8 is installed in the guest and you can log in to its web UI.
+  you mounted the pool by hand, unmount it before section 3 (`umount /srv/hc680`). Its
+  fstab line must go too; section 3b shows how.
+- OMV 8 is installed in the guest and you can log in to its web UI. This guide does not
+  install it: on a fresh Debian 13 guest, follow the official procedure
+  <https://docs.openmediavault.org/en/stable/installation/on_debian.html> (repository and key,
+  packages, `omv-confdbadm populate`, network deployment). Check that `omv-rpc`,
+  `omv-confdbadm` and `omv-salt` exist. An independent reproduction used OMV 8.5.9-1.
 - You have a root shell on the guest and on DSM. For DSM, enable SSH in Control Panel, log in
   as an administrator and run `sudo -i`.
 
@@ -188,6 +192,22 @@ Folders, Storage › File Systems.
 > that each object belongs to the **old** pool.
 
 ### 3b. Create the mount entry
+
+**If you wrote the fstab line by hand** ([03, Step 10](03-guest-storage-stack.md#step-10---the-fstab-line)),
+remove it first. It sits outside OMV's block, and OMV keeps it, so registering adds a second
+entry for `/srv/hc680`. Back up `/etc/fstab`, make sure the pool is unmounted, and delete only
+that one line outside `# >>> [openmediavault]` ... `# <<< [openmediavault]`:
+
+```sh
+cp -a /etc/fstab /etc/fstab.before-omv
+editor /etc/fstab            # delete the hand-written /srv/hc680 line only
+```
+
+After the deploy in 3c, check that exactly one active entry remains:
+
+```sh
+awk '$1 !~ /^#/ && $2=="/srv/hc680" {n++; print} END {exit n!=1}' /etc/fstab && echo "one entry"
+```
 
 The container must be open (`cryptsetup status hc680crypt` reports it active). Then:
 
