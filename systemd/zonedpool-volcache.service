@@ -1,0 +1,15 @@
+[Unit]
+Description=dm-cache volume cache (NAS vdisk) between the hc680 RAID5 and LUKS
+Requires=zonedpool-mdassemble.service
+After=zonedpool-mdassemble.service lvm2-monitor.service
+Before=zonedpool-cryptopen.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/zonedpool-volcache start
+ExecStop=/usr/local/sbin/zonedpool-volcache stop
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=multi-user.target

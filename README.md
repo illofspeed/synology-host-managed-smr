@@ -143,6 +143,22 @@ nothing, a watcher fallback that could skip the census, metric names failing
 `promtool` lint) are fixed in this version. The emulation does not cover the NAS side,
 real SATA drives or their timing.
 
+**Drive replacement and caching (2026-09-28/29).** One healthy member was pulled hot while
+reads ran, put back into another bay, re-formatted and rebuilt
+([05, 3.7](docs/05-operations-monitoring-performance.md#37-replacing-a-drive-tested-2026-09-28)).
+- Degraded reads stayed byte-identical.
+- The hot-plug froze every drive on that port multiplier for 12 s (pull) and 25 s (insert),
+  with 0 errors on the others.
+- **The rebuild is the weak spot:** every rebuilt chunk goes through the new member's own
+  buffer and reclaim, so it ran at 26-30 MB/s, **about 10 days**.
+- A cache device for that member (a NAS virtual disk behind DSM's NVMe cache) brought it to
+  73-178 MB/s, **2-3 days**.
+- A dm-cache volume cache between the RAID and LUKS made random I/O 20-40 times faster
+  (4 KiB random read 303 → 9,804-12,859 IOPS) and stays warm across reboots.
+
+Both caches make the pool depend on the cache device. Everything is in
+[08 — Caching](docs/08-caching.md).
+
 | Other measurements | Result |
 |---|---|
 | Hyper Backup alone, kernel 7.2.6 | ~68 MB/s into the pool, drives ~22 % busy |
@@ -150,7 +166,8 @@ real SATA drives or their timing.
 | Buffer drain after a reclaim kick, with LUKS | ~8 zones/min per drive, ~1.5 h |
 | md repair or resync on an idle pool | 173–205 MB/s; a full pass takes ~33–40 h |
 | LUKS2 aes-xts 512-bit, `cryptsetup benchmark`, one thread | ~950 MiB/s encrypt, ~1020 MiB/s decrypt |
-| Pool mounted after a reboot inside the guest | ~90–100 s into boot |
+| Pool mounted after a reboot inside the guest | ~90–100 s into boot (with cache layers: shutdown ~5 min, mount ~2.5 min after kernel start) |
+| Member rebuild (24.6 TiB) | ~26–30 MB/s, ~10 days; with a cache device 73–178 MB/s, 2–3 days |
 | After a VMM power cycle of the guest | add ~2.5 min for re-attach and drive enumeration |
 | DSM itself on the drives: DSM 7.4 (SA6400, RR loader, "Kernel: custom") in a VM with **2 vCPU**, inside a Proxmox VE guest that owns the controller | Tested, and it works: a normal DSM RAID5 pool on the three drives. md resync 177–197 MB/s per disk with 2 vCPU, 111–117 MB/s with 4. The author decided to stay with OpenMediaVault. Recipe and caveats in [06, section 4](docs/06-alternatives-and-lessons.md#4-dsm-on-the-drives-through-a-nested-dsm-vm-tested-works) |
 
@@ -186,7 +203,16 @@ real SATA drives or their timing.
    and nothing reports the unit's own fans or sensors. Only the drives' SMART
    temperatures remain, and the monitoring alerts on those
    ([01, 7.6](docs/01-requirements-and-risks.md#76-dsm-loses-the-expansion-unit-fans-included)).
-9. **The published scripts are adapted, not the exact as-built files.** The
+9. **A member rebuild takes about 10 days** without a cache device, with no redundancy
+   meanwhile. The array has no write-intent bitmap (mdadm skips it with `--run`), and
+   `mdadm-last-resort` can start it without a slow member at boot. Either turns a short
+   hiccup into a full rebuild; both are covered in
+   [03, Step 5](docs/03-guest-storage-stack.md#step-5---create-the-raid5)
+   ([01, 7.7](docs/01-requirements-and-risks.md#77-a-member-rebuild-takes-about-10-days)).
+10. **Optional cache layers tie the pool to the cache device.** With cache devices on the
+    NAS's own volume, losing that volume loses the pool too
+    ([01, 7.9](docs/01-requirements-and-risks.md#79-cache-devices-make-the-pool-depend-on-them)).
+11. **The published scripts are adapted, not the exact as-built files.** The
    NAS watcher, its boot hook and the metrics script were made configurable
    and gained extra checks. The watcher and hook were exercised against a
    simulated sysfs tree, not on a Synology, and the published metrics script
@@ -214,7 +240,7 @@ Read in this order:
    the NFS remote folder in DSM, and bulk copies from DSM.
 5. [05 — Operations, monitoring, performance](docs/05-operations-monitoring-performance.md):
    what normal looks like, metrics and alerts, maintenance, drive replacement
-   (untested outline) and a recovery playbook.
+   (tested once, 2026-09-28) and a recovery playbook.
 6. [06 — Alternatives and lessons](docs/06-alternatives-and-lessons.md): zoned
    btrfs + mergerfs + SnapRAID (abandoned after silent data loss), DSM on the
    drives through a nested DSM VM on a Proxmox VE guest with 2 vCPU (tested, it
@@ -222,6 +248,9 @@ Read in this order:
    host-managed drives, and the kernel comparison.
 7. [07 — Prior art](docs/07-prior-art.md): what already exists, the published
    advice against this design, and what this repository adds.
+8. [08 — Caching](docs/08-caching.md) (optional): why a rebuild takes 10 days, a cache
+   device per dm-zoned member, a dm-cache volume cache between the RAID and LUKS, and how to
+   make DSM's SSD cache take their I/O.
 
 ## Repository layout
 
@@ -229,21 +258,26 @@ Read in this order:
 .
 ├── README.md
 ├── LICENSE                                GNU GPL v3
-├── docs/                                  01-07, see "Start here"
+├── docs/                                  01-08, see "Start here"
 ├── scripts/
 │   ├── nas/                               runs on DSM, as root
 │   │   ├── synology-zoned-attach.sh       watcher: model census, vfio-pci bind, live attach;
 │   │   │                                  modes census | status | once | watch
 │   │   ├── attach.conf.example            its config (read once, at start: restart after edits)
-│   │   └── S99zoned-attach.sh             /usr/local/etc/rc.d boot hook: start|stop|restart|status
+│   │   ├── S99zoned-attach.sh             /usr/local/etc/rc.d boot hook: start|stop|restart|status
+│   │   └── flashcache-seq-skip.sh         optional: DSM SSD cache also caches sequential I/O (08)
 │   └── guest/                             runs in the Linux guest, as root
 │       ├── zonedpool-dmzassemble          creates the dm-zoned mappers from by-id at boot
+│       │                                  (optionally with a cache device per member, 08)
+│       ├── zonedpool-volcache             optional dm-cache volume cache between md and LUKS (08)
 │       ├── zonedpool-reclaim-kick         keeps dm-zoned's idle buffer drain going (7.2.6)
 │       └── zoned-pool-metrics             node_exporter textfile metrics + hang evidence capture
 ├── systemd/                               the late boot chain in the guest, plus the kick timer
 │   ├── zonedpool-dmzassemble.service
 │   ├── zonedpool-mdassemble.service
 │   ├── zonedpool-cryptopen.service
+│   ├── zonedpool-cryptopen.service.d/volcache.conf   with the volume cache: LUKS only on it (08)
+│   ├── zonedpool-volcache.service         optional volume cache (08)
 │   └── zonedpool-reclaim-kick.{service,timer}
 ├── examples/                              guest config files, with placeholders
 │   ├── dmzoned.conf.example               /etc/zonedpool/dmzoned.conf

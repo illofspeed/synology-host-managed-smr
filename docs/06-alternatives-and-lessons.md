@@ -24,7 +24,7 @@ not tried is marked as such.
 | DSM on the drives, in a nested DSM VM on dm-zoned mappers | Yes, as a test pool on 2026-09-25 | Works: DSM RAID5 pool, 49.1 TiB (DSM shows "49.1 TB") | Extra virtualisation layers, 2 vCPUs saturated, DSM sees only virtual disks, and it was not faster ([section 4](#4-dsm-on-the-drives-through-a-nested-dsm-vm-tested-works)) |
 | md RAID directly on the drives | Yes, in a lab | The array is created, then the first write fails | Parity writes land out of zone order ([section 5](#5-zfs-lvm-md-and-caches-directly-on-host-managed-drives)) |
 | ZFS or LVM directly on the drives | No | Unsupported | No host-managed SMR support ([section 5](#5-zfs-lvm-md-and-caches-directly-on-host-managed-drives)) |
-| Block caches (dm-cache, dm-writecache, bcache) on the drives | Yes, in a lab | Refused, or accepted and then broken | [Section 5](#5-zfs-lvm-md-and-caches-directly-on-host-managed-drives) |
+| Block caches (dm-cache, dm-writecache, bcache) on the drives | Yes, in a lab | Refused, or accepted and then broken | [Section 5](#5-zfs-lvm-md-and-caches-directly-on-host-managed-drives). Caches that work: dm-zoned's own cache device and dm-cache above the RAID, [08](08-caching.md) |
 | Another OS on the Synology hardware | Researched, not tried | Not viable | No mainline Linux driver for the 88SE1475 that runs the internal bays ([section 6](#6-another-os-on-the-synology-hardware-not-viable)) |
 | Passing disks, not the controller | No | Not tried: `scsi-block` is unavailable because DSM creates no block device on the DX1222/AHCI path; `scsi-generic` via `/dev/sgX` is unverified on DSM/VMM | Whole-controller passthrough is the validated method ([section 7](#7-passing-drives-instead-of-the-controller)) |
 | **dm-zoned → md RAID5 → LUKS2 → XFS in an OpenMediaVault guest** | **In use** | | [03](03-guest-storage-stack.md), [04](04-openmediavault-and-synology-integration.md) |
@@ -630,4 +630,5 @@ What this taught:
 [03 — Guest storage stack](03-guest-storage-stack.md) ·
 [04 — OpenMediaVault and Synology integration](04-openmediavault-and-synology-integration.md) ·
 [05 — Operations, monitoring, performance](05-operations-monitoring-performance.md) ·
-[07 — Prior art](07-prior-art.md)
+[07 — Prior art](07-prior-art.md) ·
+[08 — Caching](08-caching.md)

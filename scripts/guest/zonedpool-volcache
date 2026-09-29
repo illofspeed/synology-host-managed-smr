@@ -1,0 +1,23 @@
+#!/bin/bash
+# zonedpool-volcache start|stop - the optional dm-cache "volume cache" between the RAID5 and LUKS:
+#     md (RAID5 over dz1..dz3) -> hc680cache (dm-cache, writeback, smq) -> hc680crypt (LUKS2) -> XFS
+# Install as /usr/local/sbin/zonedpool-volcache (0755), started by zonedpool-volcache.service.
+# The cache lives on a regular block device prepared with LVM (VG hc680ssd, LVs volcache_meta
+# 1 GiB zeroed, volcache_data). Setup, the LUKS guard and rollback: docs/08-caching.md.
+set -u
+MD=/dev/md/hc680; VG=hc680ssd; NAME=hc680cache
+case "${1:-}" in
+  start)
+    for t in $(seq 1 60); do [ -b $MD ] && break; sleep 5; done
+    [ -b $MD ] || { logger -t zonedpool "volcache: $MD absent"; exit 1; }
+    vgchange -ay $VG >/dev/null 2>&1
+    for t in $(seq 1 60); do [ -b /dev/$VG/volcache_meta ] && [ -b /dev/$VG/volcache_data ] && break; sleep 5; done
+    [ -b /dev/$VG/volcache_data ] || { logger -t zonedpool "volcache: LVs absent"; exit 1; }
+    dmsetup info $NAME >/dev/null 2>&1 && exit 0
+    dmsetup create $NAME --table "0 $(blockdev --getsz $MD) cache /dev/$VG/volcache_meta /dev/$VG/volcache_data $MD 1024 1 writeback smq 0" \
+      && logger -t zonedpool "volcache: $NAME created" || { logger -t zonedpool "volcache: create FAILED"; exit 1; } ;;
+  stop)
+    dmsetup info $NAME >/dev/null 2>&1 || exit 0
+    dmsetup remove $NAME && logger -t zonedpool "volcache: $NAME removed" ;;
+  *) echo "usage: $0 start|stop"; exit 2 ;;
+esac

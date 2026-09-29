@@ -526,6 +526,33 @@ What remains is each drive's own SMART temperature, which the monitoring alerts 
 unit left at its boot level: 40-45 C idle, up to 49 C under continuous writes. Switching DSM
 to Cool mode made no difference to the DX1222's drives. Plan for airflow around the unit.
 
+### 7.7 A member rebuild takes about 10 days
+
+Replacing one drive means md rewrites the whole 24.6 TiB member through dm-zoned. With the
+member's write buffer on the drive itself, that ran at 26-30 MB/s once the buffer was full:
+**about 10 days, with no redundancy left.** A second drive problem in that window loses the
+array. A cache device for the new member, formatted together with it, brought the same
+rebuild to 2-3 days. See [08, sections 2-3](08-caching.md#2-what-a-member-rebuild-costs-without-a-cache).
+Two things can trigger a full rebuild without any drive failing:
+- a member that drops out briefly, because the array has no write-intent bitmap;
+- `mdadm-last-resort` starting the array without a slow member at boot.
+
+Both are in [03, Step 5](03-guest-storage-stack.md#step-5---create-the-raid5).
+
+### 7.8 Hot-plug freezes the whole bay group
+
+Plugging or pulling any drive behind one of the DX1222's port multipliers freezes all drives
+on that multiplier while libata recovers it: **12 s** for a pull and **25 s** for an insert in
+the test of 2026-09-28. The other drives lost no data and logged no errors, but every I/O to
+them waited. See [05, section 3.7](05-operations-monitoring-performance.md#37-replacing-a-drive-tested-2026-09-28).
+
+### 7.9 Cache devices make the pool depend on them
+
+The optional cache layers in [08](08-caching.md) store dm-zoned metadata and not yet written
+data on regular block devices. On the reference system those are virtual disks on the NAS's
+own volume. Losing that volume then loses the zoned pool too, so the pool is no longer an
+independent copy of the NAS's data.
+
 ## 8. What you need
 
 - **Backups.** Back up the NAS's own data, because of
@@ -568,4 +595,5 @@ Other pages:
 [04 — OpenMediaVault and Synology integration](04-openmediavault-and-synology-integration.md) ·
 [05 — Operations, monitoring, performance](05-operations-monitoring-performance.md) ·
 [06 — Alternatives and lessons](06-alternatives-and-lessons.md) ·
-[07 — Prior art](07-prior-art.md)
+[07 — Prior art](07-prior-art.md) ·
+[08 — Caching](08-caching.md)

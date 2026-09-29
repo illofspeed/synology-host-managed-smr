@@ -43,6 +43,8 @@ All guest commands run as root.
 | Reboot inside the guest | The controller stays attached. In the passing reboot test the pool was mounted about 90 s into boot (mappers ~84 s, array ~86 s, LUKS ~89 s, mount ~90 s), with NFS, SMB and rsync running right after. |
 | VMM power cycle of the guest | Add about 2.5 minutes for the watcher to re-attach the controller and the drives to enumerate. |
 | Worst case seen | One early boot waited 11 minutes for the drives; the pool was up about 12 minutes after the reboot. That is why the timeouts are long. |
+| Reboot with a cache device and the volume cache ([08](08-caching.md)), 2026-09-29 | Shutdown took about 5 minutes: an open console login on tty1 held it 90 s (systemd's stop timeout), `blk-availability.service` timed out after another 90 s, and the rest went to the final shutdown and the VM restart. After the kernel started, the mappers took 1.5-2 min (one member 30 s late), then array, volume cache, LUKS and mount followed within about 20 s. A member rebuild resumed where it stopped. |
+| A drive running a SMART self-test | A guest reboot resets the controller, and the drive aborts the test ("Interrupted (host reset)"). Restart it afterwards. |
 
 ### 1.2 The dm-zoned write buffer
 
@@ -378,9 +380,9 @@ and inactive.
 | Alert | Fires when | Severity | What it means, first step |
 |---|---|---|---|
 | `Hc680PoolDown` | `hc680_array_up == 0` for 5 min | critical | The array is missing or `/srv/hc680` is not mounted. Walk the chain ([4.1](#41-pool-not-mounted-after-boot-walk-the-chain)). |
-| `Hc680ArrayDegraded` | fewer active members than expected, for 2 min | critical | No redundancy left. Check `dmsetup ls` first: the missing member may be a mapper, not a drive ([3.7](#37-replacing-a-drive-untested-outline)). |
+| `Hc680ArrayDegraded` | fewer active members than expected, for 2 min | critical | No redundancy left. Check `dmsetup ls` first: the missing member may be a mapper, not a drive ([3.7](#37-replacing-a-drive-tested-2026-09-28)). |
 | `Hc680ParityMismatches` | `mismatch_cnt > 0` for 15 min | warning | Expected during the first repair after `--assume-clean`. After a completed repair, run a `check`; mismatches found then are real ([3.2](#32-parity-check-and-repair)). |
-| `Hc680SmartFailed` | SMART overall health not passed, 5 min | critical | Plan a replacement ([3.7](#37-replacing-a-drive-untested-outline)). |
+| `Hc680SmartFailed` | SMART overall health not passed, 5 min | critical | Plan a replacement ([3.7](#37-replacing-a-drive-tested-2026-09-28)). |
 | `Hc680SmartUnknown` | `hc680_smart_health_known == 0` for 30 min | warning | Health cannot be read: SMART may be disabled or the drive is not answering. Check `smartctl -H -A` on that drive (3.5). |
 | `Hc680DriveHot` | drive above 55 C for 15 min | warning | Airflow in the expansion unit. The reference drives ran at 42-44 C. |
 | `Hc680WriteBufferFull` | buffer ratio above 0.85 for 30 min | info | Not a fault: throughput is reduced until the pool has been idle for a while (1.2). Full while idle for hours means reclaim is not working ([4.2](#42-stuck-reclaim-worker)). |
@@ -710,13 +712,19 @@ both health gauges are `1` (2.3). This gauge covers detected drives; a drive mis
 - Keep the keyfile or a passphrase, and a header backup, somewhere off the pool and off the
   guest. If you lose the keyfile and every passphrase, the data is gone.
 
-### 3.7 Replacing a drive (UNTESTED outline)
+### 3.7 Replacing a drive (tested 2026-09-28)
 
-> **Untested.** Nobody has replaced a member of this RAID5-over-dm-zoned pool yet. The
-> steps below combine standard `mdadm` and `dmzadm` usage with lessons from a drive
-> replacement that was tested on the earlier SnapRAID design. Read every step before you
-> start, and keep the backup of the pool's contents current: RAID5 survives exactly one
-> failure, and a second problem during the rebuild loses the array.
+> **Tested once.** On 2026-09-28 a healthy member was pulled hot while reads ran, put back
+> into a different bay, re-formatted, and rebuilt with the steps below. Pulling a member of
+> a healthy array is the realistic stand-in for a failed drive, but it is one run on one
+> machine. Read every step before you start, and keep the backup of the pool's contents
+> current: RAID5 survives exactly one failure, and a second problem during the rebuild
+> loses the array.
+>
+> **Plan for the time.** Without a cache device the rebuild took **about 10 days**
+> ([08, section 2](08-caching.md#2-what-a-member-rebuild-costs-without-a-cache)), all of it
+> without redundancy. With a cache device for the new member it takes 2-3 days
+> ([08, section 3](08-caching.md#3-dm-zoned-cache-devices)).
 
 **What changes compared with the old design.** In the SnapRAID design a dead drive took the
 whole pool offline, and the rebuild restored file contents but not ownership or permissions.
@@ -745,7 +753,15 @@ wrong target is a **surviving member**.
 
    If md refuses `--re-add`, `--add` works too but rebuilds the whole member. A lab test of
    dm-zoned under md showed that a member that arrives late, after md has started the array
-   degraded, needs `--re-add`. On the final stack this is untested.
+   degraded, needs `--re-add`. On the final stack this is untested. **Without a write-intent
+   bitmap, `--re-add` of a member that md has already failed does not work: the other members'
+   event count has moved on, so it is `--add` and a full rebuild.** The reference array has no
+   bitmap ([03, Step 5](03-guest-storage-stack.md#step-5---create-the-raid5)).
+
+   **After a hot pull and re-insert, the old mapper is still there.** md keeps `dzN` open and
+   `dzN` still points at the vanished device, so the drive comes back under a **new** kernel
+   name (`sdd` became `sdg` in the test). The by-id link follows the drive, but the mapper does
+   not: remove it (step 3) before you re-create it.
 
 2. **Reduce writes.** Pause the Hyper Backup task and stop rsync pushes. Every write while
    degraded runs without redundancy, and writes slow down the rebuild.
@@ -758,14 +774,25 @@ wrong target is a **surviving member**.
    dmsetup remove dzN
    ```
 
+   A member that is **still rebuilding** answers the remove with `hot remove failed ...
+   Device or resource busy` until md has stopped the recovery thread. The `--fail` has
+   worked by then; repeat the `--remove` a few seconds later.
+
    If the mapper has already disappeared, `mdadm /dev/md/hc680 --remove failed` (or
    `--remove detached`) removes md's leftover entry.
 
-4. **Swap the drive.** Whether hot-swapping works on the passed-through 9235 behind its port
-   multipliers is untested. The conservative route: shut the guest down cleanly, swap the
-   drive in the expansion unit, start the guest; the watcher re-attaches the controller.
-   Remember that starting a guest that carries the controller is the situation the NAS panic
-   was correlated with ([01, 7.1](01-requirements-and-risks.md#71-nas-kernel-panic-in-dsms-own-storage-driver)).
+4. **Swap the drive.** Hot-swapping on the passed-through 9235 worked in the test, with one
+   side effect: **every hot-plug event freezes all drives behind the same port multiplier.**
+   libata's error handling resets the multiplier's control port and every port on it. Measured
+   with reads running: pulling a member froze the two others for **12 s**, inserting a drive
+   froze them for **25 s** (the new drive was slow to spin up). In both cases the other members
+   logged 0 errors: their commands waited and then completed. The DX1222 has three bays per
+   port multiplier, so plugging a drive into a bay next to the pool's members freezes the pool
+   for that long. If you run anything with short timeouts on the pool, stop it first. The
+   conservative route still exists: shut the guest down cleanly, swap the drive, start the
+   guest; the watcher re-attaches the controller. Remember that starting a guest that carries
+   the controller is the situation the NAS panic was correlated with
+   ([01, 7.1](01-requirements-and-risks.md#71-nas-kernel-panic-in-dsms-own-storage-driver)).
 
    On the NAS: while a drive is missing, or if the new drive is a different model, the
    watcher's model census no longer matches (`ZONED_COUNT`, `ZONED_MODEL`). While the
@@ -812,10 +839,13 @@ wrong target is a **surviving member**.
    cat /proc/mdstat                                # "recovery = ..."
    ```
 
-   The rebuild writes the entire member, about 24.6 TiB, through dm-zoned. Its duration on
-   this stack has not been measured. If it behaves like other sustained writes once the new
-   drive's buffer is full (roughly 40-80 MB/s), it takes several days. Keep writes low until
-   it finishes.
+   The rebuild writes the entire member, about 24.6 TiB, through dm-zoned. **Measured:**
+   80-93 MB/s for about 55 minutes while the new member's own buffer fills, then 26-30 MB/s,
+   because every chunk goes through that buffer and reclaim on the same drive. md estimated
+   **about 10 days**. With a cache device formatted together with the new drive
+   (`dmzadm --format <cache> <drive>`, [08, section 3.3](08-caching.md#33-how-to-set-it-up)),
+   the rebuild ran at 73-178 MB/s: 2-3 days. Keep writes low until it finishes. The
+   re-format in step 6 took 12 s.
 
 9. **Afterwards:** `mdadm --detail` shows 3 active devices and `clean`; run a `check`
    (3.2); check that the metrics show the new drive and that its reclaim worker name matches
@@ -917,7 +947,7 @@ wrong.
 
    Then continue with the LUKS layer (`systemctl restart zonedpool-cryptopen`) and the mount.
 
-   If the array runs degraded (`[UU_]`), see [3.7](#37-replacing-a-drive-untested-outline),
+   If the array runs degraded (`[UU_]`), see [3.7](#37-replacing-a-drive-tested-2026-09-28),
    step 1.
 
 4. **LUKS:**
@@ -933,6 +963,14 @@ wrong.
    passphrase (`cryptsetup open /dev/md/hc680 hc680crypt`). If `luksDump` says the device is
    not a valid LUKS device although the array is assembled correctly, go to
    [4.3](#43-luks-header-restore).
+
+   **With the volume cache of [08, section 4](08-caching.md#4-a-volume-cache-between-the-raid-and-luks)**
+   there is one more link before LUKS: `systemctl status zonedpool-volcache` and
+   `dmsetup status hc680cache`. LUKS must then be opened on `/dev/mapper/hc680cache`, **never**
+   on `/dev/md/hc680`, including a manual unlock with a passphrase. Opening it on the raw array
+   bypasses data that is still dirty in the cache. If `hc680cache` is missing, check the volume
+   group first (`vgs hc680ssd`, `lvs hc680ssd`; `vgchange -ay hc680ssd`), then
+   `systemctl start zonedpool-volcache`.
 
 5. **Filesystem:**
 
@@ -1223,6 +1261,12 @@ stuck.
 | Editing `attach.conf` without restarting the watcher | The controller went to the old guest | Restart the watcher (4.4) |
 | Formatting the wrong drive during a replacement | Would destroy a degraded array | Check the serial three times (3.7) |
 | Trusting the idle drain on 7.2.6 | Buffers stayed two thirds full for hours on an idle pool | Install the reclaim-kick timer (1.2.1) |
+| Creating the array with `--run` | mdadm skipped its bitmap question and created no write-intent bitmap | A brief member drop-out costs a full rebuild; see [03, Step 5](03-guest-storage-stack.md#step-5---create-the-raid5) |
+| `mdadm-last-resort` with a slow mapper | 30 s after a partial incremental assembly it tried to start the array without the late member | Mask it for this array ([03, Step 5](03-guest-storage-stack.md#step-5---create-the-raid5)) |
+| Removing a member that is still rebuilding | `hot remove failed ... Device or resource busy` | Repeat `--remove` a few seconds after `--fail` (3.7) |
+| Hot-plugging a drive next to the pool | All drives on that port multiplier froze for 12-25 s | Expect it; stop latency-sensitive work first (3.7) |
+| Editing a script while it runs | bash reads scripts as it executes; an in-place edit can make a running job execute shifted bytes | Install changed scripts with `mv` (new inode), never overwrite in place |
+| Opening LUKS on the raw array under a write-back cache | Would bypass dirty cache blocks | Open only on `/dev/mapper/hc680cache` ([08, section 4](08-caching.md#4-a-volume-cache-between-the-raid-and-luks)) |
 
 ## Files
 
@@ -1232,6 +1276,8 @@ stuck.
 | [monitoring/prometheus-rules.yml](../monitoring/prometheus-rules.yml) | a file in your Prometheus rules directory |
 | [scripts/guest/zonedpool-reclaim-kick](../scripts/guest/zonedpool-reclaim-kick) | `/usr/local/sbin/zonedpool-reclaim-kick` (0755) |
 | [systemd/zonedpool-reclaim-kick.service](../systemd/zonedpool-reclaim-kick.service), [.timer](../systemd/zonedpool-reclaim-kick.timer) | `/etc/systemd/system/`, timer enabled (1.2.1) |
+| [scripts/guest/zonedpool-volcache](../scripts/guest/zonedpool-volcache), [systemd/zonedpool-volcache.service](../systemd/zonedpool-volcache.service), [systemd/zonedpool-cryptopen.service.d/volcache.conf](../systemd/zonedpool-cryptopen.service.d/volcache.conf) | optional volume cache, [08, section 4](08-caching.md#4-a-volume-cache-between-the-raid-and-luks) |
+| [scripts/nas/flashcache-seq-skip.sh](../scripts/nas/flashcache-seq-skip.sh) | DSM Task Scheduler, boot-up, root ([08, section 5](08-caching.md#5-synology-make-the-ssd-cache-take-the-cache-disks-io)) |
 
 ## Other pages
 
@@ -1240,4 +1286,5 @@ stuck.
 [03 - Guest storage stack](03-guest-storage-stack.md) ·
 [04 - OpenMediaVault and Synology integration](04-openmediavault-and-synology-integration.md) ·
 [06 - Alternatives and lessons](06-alternatives-and-lessons.md) ·
-[07 - Prior art](07-prior-art.md)
+[07 - Prior art](07-prior-art.md) ·
+[08 - Caching](08-caching.md)

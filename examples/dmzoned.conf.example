@@ -1,6 +1,10 @@
 # /etc/zonedpool/dmzoned.conf - read by /usr/local/sbin/zonedpool-dmzassemble at boot.
 #
-# <device by-id path>                               <mapper name>
+# <device by-id path>                               <mapper name>  [<cache device>]
+#
+# The optional third field is a regular block device that dm-zoned uses as this member's cache
+# device (formatted together with the drive: dmzadm --format <cache> <drive>). It then holds the
+# member's dm-zoned metadata for good. See docs/08-caching.md before you use it.
 #
 # by-id, never /dev/sdX: kernel names move when the controller enumerates differently.
 # Use the whole-disk link (no "-part" suffix). List yours with:
@@ -9,3 +13,5 @@
 /dev/disk/by-id/ata-WDC_WSH722870ALE604_<SERIAL_1>  dz1
 /dev/disk/by-id/ata-WDC_WSH722870ALE604_<SERIAL_2>  dz2
 /dev/disk/by-id/ata-WDC_WSH722870ALE604_<SERIAL_3>  dz3
+# Example of a member with a cache device (a virtual disk of the NAS):
+# /dev/disk/by-id/ata-WDC_WSH722870ALE604_<SERIAL_2>  dz2  /dev/disk/by-id/wwn-0x<CACHE_DISK_WWN>

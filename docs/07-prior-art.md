@@ -927,4 +927,5 @@ Three research passes ran independently. Queries are listed as they were run.
 [03 — Guest storage stack](03-guest-storage-stack.md) ·
 [04 — OpenMediaVault and Synology integration](04-openmediavault-and-synology-integration.md) ·
 [05 — Operations, monitoring, performance](05-operations-monitoring-performance.md) ·
-[06 — Alternatives and lessons](06-alternatives-and-lessons.md)
+[06 — Alternatives and lessons](06-alternatives-and-lessons.md) ·
+[08 — Caching](08-caching.md)

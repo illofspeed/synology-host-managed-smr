@@ -442,6 +442,20 @@ UUID so that existing references stayed valid. Leave that out on a first build.
 > untested here. A resync of this array later ran at about 195-205 MB/s, similar to the
 > repair.
 
+> **Pitfall: no write-intent bitmap.** Without `--bitmap`, mdadm (4.4 on the reference
+> guest) asks *"To optimize recovery speed, it is recommended to enable write-intent bitmap,
+> do you want to enable it now?"*, but **only without `--run`**. With `--run`, as in the
+> command above, it skips the question and creates none (`mdadm.c`, create mode:
+> `c.runstop != 1 && ask(...)`, otherwise `BitmapNone`). The reference array has none
+> (`mdadm --detail` shows no "Intent Bitmap").
+> Without a bitmap, a member that drops out even briefly (a pulled cable, a slow drive at
+> boot) cannot be re-added with a quick catch-up resync. It needs a **full rebuild**, which
+> on this stack takes about 10 days without a cache device
+> ([08, section 2](08-caching.md#2-what-a-member-rebuild-costs-without-a-cache)).
+> `--bitmap=internal` at create time, or `mdadm --grow --bitmap=internal` later on an idle
+> array, adds one. Its write overhead on dm-zoned, where the bitmap updates become small
+> random writes into the buffer zones, **has not been measured yet**.
+
 ### mdadm.conf
 
 ```sh
@@ -462,6 +476,26 @@ update-initramfs -u
 The initramfs cannot assemble this array anyway, because its members only exist after
 `zonedpool-dmzassemble` has run. Either udev assembles it incrementally as the mappers
 appear, or the unit below does.
+
+> **Pitfall: `mdadm-last-resort` can start the array without a slow member.** When udev has
+> added some members incrementally, Debian's `mdadm-last-resort@md127.timer` fires 30 s
+> later and starts the array with whatever is there. dm-zoned mappers do not always appear
+> quickly: creating one took 30 s to 2 min on the reference guest (usually about 7 s). On a
+> healthy array that means md starts **degraded** without the slow member, and without a
+> bitmap that member then needs a full rebuild. On 2026-09-29 the timer fired while a
+> member was still missing. It failed only because another member was itself still
+> rebuilding. The half-assembled array then blocked the late member ("ADD_NEW_DISK not
+> supported") and the assemble unit ("already active"). Mask the timer for this array, so
+> md waits until all members are there:
+>
+> ```sh
+> systemctl mask mdadm-last-resort@md127.timer mdadm-last-resort@md127.service
+> ```
+>
+> Verified at the next reboot: a member was again 30 s late, and the array waited for it.
+> If the name is not `md127` on your system, use yours. If the array ends up inactive
+> anyway, [05, section 4.1](05-operations-monitoring-performance.md#41-pool-not-mounted-after-boot-walk-the-chain)
+> shows how to stop it and assemble it explicitly.
 
 ### stripe_cache_size
 
@@ -939,3 +973,5 @@ covers shares, NFS for DSM and the Hyper Backup target.
 [06-alternatives-and-lessons.md](06-alternatives-and-lessons.md) explains why this stack
 replaced the earlier zoned btrfs + mergerfs + SnapRAID design, and why it was chosen over a
 nested DSM VM.
+[08-caching.md](08-caching.md) covers optional cache layers: a cache device per dm-zoned
+member and a volume cache between the RAID and LUKS.

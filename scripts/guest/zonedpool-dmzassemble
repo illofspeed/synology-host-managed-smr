@@ -5,8 +5,12 @@
 #
 # dm-zoned mappings are NOT persistent: nothing recreates them at boot, so without this the
 # RAID cannot assemble and the pool stays unmounted. Devices are listed by /dev/disk/by-id
-# path in /etc/zonedpool/dmzoned.conf, one per line as:  <by-id-path> <mapper-name>
+# path in /etc/zonedpool/dmzoned.conf, one per line as:
+#   <by-id-path> <mapper-name> [<cache-device>]
 # by-id, not /dev/sdX: kernel names move when a controller enumerates differently.
+# The optional third field names a regular (non-zoned) block device that dm-zoned uses as its
+# cache device; drive and cache must have been formatted together with
+# `dmzadm --format <cache-device> <drive>`. See docs/08-caching.md.
 #
 # Environment overrides:
 #   ZP_DMZ_CONF  config file            (default /etc/zonedpool/dmzoned.conf)
@@ -15,7 +19,7 @@ set -u
 CONF=${ZP_DMZ_CONF:-/etc/zonedpool/dmzoned.conf}
 [ -r "$CONF" ] || { echo "no $CONF"; exit 0; }
 rc=0
-while read -r dev name; do
+while read -r dev name cache; do
   case "$dev" in ''|\#*) continue;; esac
   [ -n "${name:-}" ] || continue
   # WAIT for the device. Host-managed drives behind a passed-through controller can take
@@ -25,6 +29,15 @@ while read -r dev name; do
   while [ ! -b "$dev" ] && [ "$waited" -lt "${ZP_DMZ_WAIT:-600}" ]; do
     sleep 5; waited=$((waited+5))
   done
+  if [ -n "${cache:-}" ]; then
+    # The cache device holds this member's dm-zoned metadata: without it the drive is unusable.
+    w2=0
+    while [ ! -b "$cache" ] && [ "$w2" -lt "${ZP_DMZ_WAIT:-600}" ]; do sleep 5; w2=$((w2+5)); done
+    if [ ! -b "$cache" ]; then
+      logger -t zonedpool "dmzassemble: cache $cache for $name still absent after ${w2}s - skipping"
+      rc=1; continue
+    fi
+  fi
   if [ ! -b "$dev" ]; then
     logger -t zonedpool "dmzassemble: $dev still absent after ${waited}s - skipping"
     rc=1; continue
@@ -33,9 +46,10 @@ while read -r dev name; do
   # Already assembled (e.g. unit restarted): nothing to do.
   if dmsetup info "$name" >/dev/null 2>&1; then continue; fi
   sz=$(blockdev --getsz "$dev") || { rc=1; continue; }
-  # The dm-zoned target reads its metadata (written by `dmzadm --format`) from the drive.
-  if dmsetup create "$name" --table "0 $sz zoned $dev"; then
-    logger -t zonedpool "dmzassemble: $name from $dev"
+  # The dm-zoned target reads its metadata (written by `dmzadm --format`) from the drive, or
+  # from the cache device if there is one (listed first). dm-zoned sets the real length itself.
+  if dmsetup create "$name" --table "0 $sz zoned ${cache:+$cache }$dev"; then
+    logger -t zonedpool "dmzassemble: $name from ${cache:+$cache + }$dev"
   else
     logger -t zonedpool "dmzassemble: FAILED $name from $dev"; rc=1
   fi

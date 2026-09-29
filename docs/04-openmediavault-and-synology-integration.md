@@ -938,4 +938,4 @@ the media share.
 - Other approaches that were tried: [06-alternatives-and-lessons.md](06-alternatives-and-lessons.md)
 - Related work by others: [07-prior-art.md](07-prior-art.md)
 
-Next: [05-operations-monitoring-performance.md](05-operations-monitoring-performance.md)
+Next: [05-operations-monitoring-performance.md](05-operations-monitoring-performance.md) · Optional caching: [08-caching.md](08-caching.md)
