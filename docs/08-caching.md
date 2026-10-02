@@ -236,22 +236,35 @@ cache devices were read back from the NAS's hard drives. The rebuild fell to
 7-26 MB/s whenever the NAS's own RAID rebuild competed for them. DSM 7 has **no
 UI switch** for this any more.
 
-Setting it to 0 fixes it:
+Setting it to 0 fixed the rebuild (measurements below). It also has a cost: with 0, a
+DSM Data Scrubbing (btrfs scrub) put both NVMe cache SSDs at 100 % busy while the hard drives
+sat at ~20 %, because the scrub's long sequential read stream was inserted into the cache.
+Setting 524288 (512 MiB) brought the SSDs back to normal at once. The value the author keeps:
+
+| Situation | `skip_seq_thresh_kb` |
+|---|---|
+| Normal operation, NAS scrubs and repairs, backups | **524288** (512 MiB): zone-sized bursts (256 MiB) from the cache disks are cached, long streams bypass the SSDs |
+| A guest member rebuilds onto a dm-zoned cache device | **0** for the duration (one stream across hundreds of GB), then back to 524288 |
+| Both at once | avoid; schedule them apart |
 
 ```sh
-sysctl -w 'dev.flashcache_shared_cache_vg1_alloc_cache_1+volume_1.skip_seq_thresh_kb=0'
-dmsetup table cachedev_0 | grep -i "skip sequential"      # → skip sequential thresh(0K)
+K='dev.flashcache_shared_cache_vg1_alloc_cache_1+volume_1.skip_seq_thresh_kb'
+sysctl -w "$K=524288"                                     # normal
+sysctl -w "$K=0"                                          # only during a cached member rebuild
+dmsetup table cachedev_0 | grep -i "skip sequential"      # → skip sequential thresh(...K)
 ```
 
 The name is the reference NAS's; `sysctl -a | grep skip_seq_thresh_kb` shows
 yours. The value is lost at every NAS reboot.
 [scripts/nas/flashcache-seq-skip.sh](../scripts/nas/flashcache-seq-skip.sh)
-sets it for every flashcache instance it finds. Run it from DSM's Task
-Scheduler as root on the "Boot-up" event. A manual run was verified
-(1024 → 0), but whether DSM fires the task at boot is **not yet verified**.
-Also run it once by hand after any change to the SSD cache in DSM.
+sets it (default 524288, or the value given as its argument) for every
+flashcache instance it finds. Run it from DSM's Task Scheduler as root on the
+"Boot-up" event. A manual run was verified, but whether DSM fires the task at
+boot is **not yet verified**. Also run it once by hand after any change to the
+SSD cache in DSM. Not yet measured: whether 524288 keeps the zone bursts cached
+in daily use, and a member rebuild during a NAS scrub.
 
-What changed:
+What changed with 0 during the rebuild:
 
 - The "uncached sequential" counters stopped rising.
 - Dirty data in the NAS cache levelled off at about the virtual disks' size
@@ -259,9 +272,9 @@ What changed:
   place, so there was no pile-up.
 - Reclaim then read the cache device at 131-137 MB/s.
 
-The cost is that **every** sequential stream on that volume now passes through
-the SSDs (backups, large copies), adding wear and displacing other cached
-data. The author accepts that on enterprise SSDs.
+With 0 permanently, **every** sequential stream on that volume passes through
+the SSDs (backups, large copies, scrubs), adding wear, displacing other cached
+data and, during a scrub, saturating them. Hence 0 only for the rebuild.
 
 **The NAS's own rebuild priority matters too.** With DSM's RAID resync set to
 lower impact, the NAS's own rebuild fell to 10-25 MB/s (a ~10-day estimate)

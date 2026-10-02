@@ -627,7 +627,21 @@ cryptsetup luksDump /dev/md/hc680 | grep -i flags
 
 `--persistent` writes these flags into the LUKS2 header. Every later open picks them up
 automatically, including the plain `cryptsetup open --key-file ...` in the unit from step 8.
-Nobody checked whether discards actually get through md RAID5 to dm-zoned on this stack.
+**Discards on this stack (measured 2026-10-02): keep them off in normal use.**
+
+- md RAID5 silently drops discards unless `raid456.devices_handle_discard_safely=Y` is set
+  (dm-zoned returns zeros for discarded blocks, so Y is correct here).
+- With Y, md processes discards in 4 KiB stripe units with its raid5 thread at 100 % CPU:
+  about 49 GiB/min, so a full `fstrim` of ~45 TiB free space takes ~17 h (projected from the rate).
+- The discards are queued ahead of normal writes. During that whole trim the XFS log could not
+  write (its log worker stuck in `xlog_wait_on_iclog` for hours): the pool took no writes,
+  only reads.
+- XFS re-trims all free space on every `fstrim`, and dm-zoned does not free a sequential zone
+  that discards have emptied. So discards gain nothing in daily use; online `discard` would
+  freeze writes during every large delete.
+- They help only before converting a cached member back to a plain one (emptied chunks can
+  then be dropped). Trim then in slices (`fstrim -o <offset> -l <length>`) at a quiet time.
+- Exclude the pool from the distribution's weekly `fstrim.timer`.
 
 To find the container's UUID, which you need for crypttab, run
 `cryptsetup luksUUID /dev/md/hc680`.
