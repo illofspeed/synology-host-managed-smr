@@ -243,9 +243,10 @@ Setting 524288 (512 MiB) brought the SSDs back to normal at once. The value the 
 
 | Situation | `skip_seq_thresh_kb` |
 |---|---|
-| Normal operation, NAS scrubs and repairs, backups | **524288** (512 MiB): zone-sized bursts (256 MiB) from the cache disks are cached, long streams bypass the SSDs |
-| A guest member rebuilds onto a dm-zoned cache device | **0** for the duration (one stream across hundreds of GB), then back to 524288 |
-| Both at once | avoid; schedule them apart |
+| No member has a cache device | **1024** (DSM's default): a Btrfs scrub is then skipped and reads straight from the drives |
+| A member has a cache device, normal operation | **524288** (512 MiB): zone-sized bursts (256 MiB) from the cache disks are cached. A DSM Data Scrubbing in this state is **not** skipped (its 64 KiB reads with many in flight never form a 512 MiB stream): measured 2026-10-03, every scrub block was inserted into the cache, the NVMe pair was 96 % busy at 185 MB/s, 200,000 cached blocks were evicted per minute and the scrub was throttled to ~184 MB/s with the drives 16 % busy. Pause the scrub, or set 1024 and lose the zone-burst caching meanwhile |
+| A guest member rebuilds onto a dm-zoned cache device | **0** for the duration (one stream across hundreds of GB), then back |
+| Rebuild and scrub at once | avoid; schedule them apart |
 
 ```sh
 K='dev.flashcache_shared_cache_vg1_alloc_cache_1+volume_1.skip_seq_thresh_kb'
@@ -257,7 +258,7 @@ dmsetup table cachedev_0 | grep -i "skip sequential"      # → skip sequential 
 The name is the reference NAS's; `sysctl -a | grep skip_seq_thresh_kb` shows
 yours. The value is lost at every NAS reboot.
 [scripts/nas/flashcache-seq-skip.sh](../scripts/nas/flashcache-seq-skip.sh)
-sets it (default 524288, or the value given as its argument) for every
+sets it (default 524288, or the value given as its argument, e.g. 1024) for every
 flashcache instance it finds. Run it from DSM's Task Scheduler as root on the
 "Boot-up" event. A manual run was verified, but whether DSM fires the task at
 boot is **not yet verified**. Also run it once by hand after any change to the
