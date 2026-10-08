@@ -177,6 +177,12 @@ reference system. The patch re-enables FBS at the end of `ahci_error_handler()` 
 still attached. Note that FBS was **not** the cause of the low write speed through a port multiplier
 (section 5.3); it matters for parallel reads.
 
+### 4.5 Reproducers
+
+`repro/` reproduces the check segfault, the idle reclaim loop and the `dmzadm --repair` trap on a RAM-backed
+`scsi_debug` host-managed disk, no special hardware needed: stock tools/module crash or loop (~600 MB/s of idle
+copying), the patched ones do not. See [repro/README.md](../repro/README.md).
+
 ## 5. Traps
 
 ### 5.1 `dmzadm --repair` can destroy a member

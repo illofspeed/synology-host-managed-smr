@@ -293,6 +293,7 @@ Read in this order:
 │   ├── dmz-uncache.py                     cache-device → single-device layout
 │   ├── dmz-metaset.py                     inspect / copy dm-zoned metadata sets (instead of dmzadm --repair)
 │   └── dmz-cache-layout-SPEC.md           on-disk layout and the source references behind the tools
+├── repro/                                 reproducers on a RAM-backed scsi_debug zoned disk (09, 4.5)
 ├── patches/                               kernel 7.2 / dm-zoned-tools 2.2.2 (09, section 4)
 │   ├── dm-zoned-reclaim.patch             no random→random loop, reclaim worker keeps polling
 │   ├── dmzadm-check-conv-zones.patch      no segfault checking two-device sets
