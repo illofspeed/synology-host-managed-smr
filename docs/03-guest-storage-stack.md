@@ -988,4 +988,6 @@ covers shares, NFS for DSM and the Hyper Backup target.
 replaced the earlier zoned btrfs + mergerfs + SnapRAID design, and why it was chosen over a
 nested DSM VM.
 [08-caching.md](08-caching.md) covers optional cache layers: a cache device per dm-zoned
-member and a volume cache between the RAID and LUKS.
+member and a volume cache between the RAID and LUKS;
+[09-cache-devices-fixes-results.md](09-cache-devices-fixes-results.md) adds attaching/detaching them without a
+rebuild, measurements and three patches.

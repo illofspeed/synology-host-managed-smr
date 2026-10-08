@@ -98,7 +98,18 @@ was active in all runs and let these long sequential streams pass through, as de
 | What limits it | the drives: three members behind one port multiplier write ~300 MB/s together (section 5.3) | the NAS NVMe cache's insert path (~7,000 writes/s ≈ 170 MB/s), dips while the NAS flushes | the NAS HDDs while the cache disks fill and are read back at the same time |
 | NAS NVMe cache load | none | ~170 MB/s for hours | ~120 MB/s for 30 min, then 14–80 MB/s |
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/ingest-1.5tib-dark.svg">
+  <img alt="Cumulative GiB written over time for the three runs: plain members rise fastest to ~500 GiB and then flatten; cached with the NAS default rises almost identically to ~800 GiB and then pulls ahead, reaching 1,533 GiB after 5.1 h; cached with a 512 MiB NAS threshold is slowest at first. Exact numbers in the table above." src="img/ingest-1.5tib-light.svg" width="920">
+</picture>
+
+Chart: `tools/plot-ingest.py` from fio's write-bandwidth logs (10-second averages). The plain and 512 MiB runs were
+stopped once their steady phase was clear.
+
 Reading it:
+
+- **Up to ~800 GiB the plain pool and the cached pool with the NAS default are almost identical**; the cached pool
+  pulls ahead only after that. Below a few hundred GiB per write session there is no measurable difference.
 
 - **Plain members** take new data into each drive's conventional-zone buffer (998 zones × 256 MiB ≈ 250 GiB
   per member) at the speed of the drives, then every byte has to be copied again from the buffer into a
@@ -227,6 +238,10 @@ SHR/RAID also has a second, RAID-level phase (`md2` repair) that reads the drive
   runs and eight conversions.
 
 ## 7. What is still untested
+
+- Kernel 7.2.x contains a block-layer out-of-bounds write in `zones_cond` when a device reports more zones than
+  expected (introduced by 6e945ffb6555, fix posted to linux-block in September 2026). The HC680s report a fixed
+  zone count, so it should not trigger here; check that your kernel has the fix once it is merged.
 
 - A member rebuild onto a cached member with the patched module and the NAS at its default threshold
   (September's 73–178 MB/s were measured with the NAS threshold at 0 while the NAS itself was rebuilding).

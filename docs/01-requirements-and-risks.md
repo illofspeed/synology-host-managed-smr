@@ -596,4 +596,5 @@ Other pages:
 [05 — Operations, monitoring, performance](05-operations-monitoring-performance.md) ·
 [06 — Alternatives and lessons](06-alternatives-and-lessons.md) ·
 [07 — Prior art](07-prior-art.md) ·
-[08 — Caching](08-caching.md)
+[08 — Caching](08-caching.md) ·
+[09 — Cache devices without a rebuild, fixes, results](09-cache-devices-fixes-results.md)
