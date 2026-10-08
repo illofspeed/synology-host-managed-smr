@@ -920,6 +920,31 @@ Three research passes ran independently. Queries are listed as they were run.
 
 </details>
 
+## Re-check, October 2026
+
+A read-only search on 2026-10-03 and again on 2026-10-08 (kernel and dm-zoned-tools git history,
+dm-devel / linux-ide / linux-raid / linux-btrfs / linux-xfs archives via mirrors, zonedstorage.io,
+forums and blogs) found **no public counterpart** for: attaching or detaching a dm-zoned cache device
+without a rebuild, the `dmzadm --check` segfault on two-device sets, the dm-zoned reclaim loop and stalled
+idle polling, `dmzadm --repair` destroying a member with a corrupt primary map, FIS-based switching staying
+off after a port-multiplier hot-plug, and **any published numbers for dm-zoned under md RAID**. dm-zoned's
+kernel code had no commits after 2026-07-15 and dm-zoned-tools none since 2024-05-30.
+
+Known in part: the write-twice mechanism of dm-zoned (Reinecke, SDC 2020), md RAID5's 4 KiB discard
+granularity (linux-raid, 2019), DSM's `skip_seq_thresh_kb` (007revad's Synology_enable_sequential_IO), the
+larger write than read penalty behind Synology expansion units (Synology's 2020 expansion-unit guide), and an
+open double-free in dm-zoned's multi-device superblock loading (dm-devel, 2026-05-30, no fix found).
+
+Closest builds elsewhere: single HM-SMR drives or a btrfs RAID1 mirror (Level1Techs thread "Host managed
+zoned storage in 2025", jade.wtf zoned-storage notes, an HM-SMR pair under MinIO). No other HM-SMR build on
+Synology hardware was found.
+
+Simpler paths, status October 2026: XFS's zone allocator is no longer experimental since Linux 7.2 but is a
+single-device design (no parity RAID); btrfs zoned supports RAID0/1/10 through the raid-stripe-tree (RAID1
+costs half the capacity, and a writer-hang bug on zoned RAID was fixed only in August 2026); btrfs RAID5/6 on
+the raid-stripe-tree exists only as an RFC (June 2026); ZFS and bcachefs have no host-managed support. For
+parity redundancy across host-managed drives, dm-zoned under md remains the only working option found.
+
 ## Other pages
 
 [01 — Requirements and risks](01-requirements-and-risks.md) ·

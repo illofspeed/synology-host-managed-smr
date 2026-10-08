@@ -159,6 +159,17 @@ reads ran, put back into another bay, re-formatted and rebuilt
 Both caches make the pool depend on the cache device. Everything is in
 [08 — Caching](docs/08-caching.md).
 
+**Cache devices without a rebuild, and all members cached (October 2026).**
+- New tools attach or detach a member's dm-zoned cache device in **~3 minutes**, without reformatting
+  and without a rebuild; md takes the member back with a **5-second** bitmap resync. Eight conversions
+  on the real 27 TB members.
+- 1.5 TiB of fresh writes: plain members **201 MB/s for ~500 GiB, then 45 MB/s (~7 h)**; every member
+  cached, NAS SSD-cache threshold at DSM's default: **155 MB/s, then 75–117 MB/s (5.1 h)**, drives writing
+  each byte about once instead of almost three times.
+- Three bugs found and patched (dm-zoned reclaim, `dmzadm --check`, libahci FBS), plus a drill in which
+  `dmzadm --repair` destroyed a member's data — and how to recover instead.
+- Everything is in [09 — Cache devices without a rebuild, fixes, results](docs/09-cache-devices-fixes-results.md).
+
 | Other measurements | Result |
 |---|---|
 | Hyper Backup alone, kernel 7.2.6 | ~68 MB/s into the pool, drives ~22 % busy |
@@ -251,6 +262,9 @@ Read in this order:
 8. [08 — Caching](docs/08-caching.md) (optional): why a rebuild takes 10 days, a cache
    device per dm-zoned member, a dm-cache volume cache between the RAID and LUKS, and how to
    make DSM's SSD cache take their I/O.
+9. [09 — Cache devices without a rebuild, fixes, results](docs/09-cache-devices-fixes-results.md)
+   (optional): attach/detach tools, plain vs cached benchmarks, three patches, the
+   `dmzadm --repair` trap, `mdadm --replace`, crash test.
 
 ## Repository layout
 
@@ -258,20 +272,31 @@ Read in this order:
 .
 ├── README.md
 ├── LICENSE                                GNU GPL v3
-├── docs/                                  01-08, see "Start here"
+├── docs/                                  01-09, see "Start here"
 ├── scripts/
 │   ├── nas/                               runs on DSM, as root
 │   │   ├── synology-zoned-attach.sh       watcher: model census, vfio-pci bind, live attach;
 │   │   │                                  modes census | status | once | watch
 │   │   ├── attach.conf.example            its config (read once, at start: restart after edits)
 │   │   ├── S99zoned-attach.sh             /usr/local/etc/rc.d boot hook: start|stop|restart|status
-│   │   └── flashcache-seq-skip.sh         optional: DSM SSD cache also caches sequential I/O (08)
+│   │   └── flashcache-seq-skip.sh         optional: set DSM's SSD-cache sequential threshold (08, 09)
 │   └── guest/                             runs in the Linux guest, as root
 │       ├── zonedpool-dmzassemble          creates the dm-zoned mappers from by-id at boot
 │       │                                  (optionally with a cache device per member, 08)
 │       ├── zonedpool-volcache             optional dm-cache volume cache between md and LUKS (08)
 │       ├── zonedpool-reclaim-kick         keeps dm-zoned's idle buffer drain going (7.2.6)
+│       ├── zonedpool-encache-member       attach a cache device to a live member, no rebuild (09)
+│       ├── zonedpool-uncache-member       detach it again (09)
 │       └── zoned-pool-metrics             node_exporter textfile metrics + hang evidence capture
+├── tools/                                 offline dm-zoned metadata tools (09)
+│   ├── dmz-encache.py                     single-device → cache-device layout, data stays in place
+│   ├── dmz-uncache.py                     cache-device → single-device layout
+│   ├── dmz-metaset.py                     inspect / copy dm-zoned metadata sets (instead of dmzadm --repair)
+│   └── dmz-cache-layout-SPEC.md           on-disk layout and the source references behind the tools
+├── patches/                               kernel 7.2 / dm-zoned-tools 2.2.2 (09, section 4)
+│   ├── dm-zoned-reclaim.patch             no random→random loop, reclaim worker keeps polling
+│   ├── dmzadm-check-conv-zones.patch      no segfault checking two-device sets
+│   └── libahci-fbs-reenable.patch         FBS back on after port-multiplier error handling
 ├── systemd/                               the late boot chain in the guest, plus the kick timer
 │   ├── zonedpool-dmzassemble.service
 │   ├── zonedpool-mdassemble.service

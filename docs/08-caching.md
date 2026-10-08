@@ -94,23 +94,20 @@ capacity: 53,259,272,192 sectors instead of 52,722,401,280. md needs at least
 the old size, so a member with a cache device can be added to an array built
 without one.
 
-### 3.2 The catch: the cache device is bound to the member
+### 3.2 Attaching and removing a cache device
 
 The cache device holds the member's dm-zoned metadata (primary and secondary
-metadata sets; the drive keeps only a third superblock). `dmzadm`
-2.2.2 can `--format`, `--check`, `--repair`, `--relabel`, `--start` and
-`--stop`. It **cannot** detach or move a cache device.
+metadata sets; the drive keeps only a third superblock). `dmzadm` 2.2.2 can
+`--format`, `--check`, `--repair`, `--relabel`, `--start` and `--stop`; it
+**cannot** attach, detach or move a cache device.
 
-- **Removing the cache** means re-formatting the member without it, then a full
-  md rebuild of that member (the ~10 days of section 2).
-- **Moving the cache** to another device of the same size should work as a
-  byte-exact copy while the pool is stopped, because the copy carries the same
-  superblocks. This is **untested**.
-- **Adding a cache** to a member also means re-formatting it and a full rebuild.
-  The cheap moment is a drive replacement, which re-formats the member anyway.
-
-The author therefore gives a member a cache device **only when that member is
-rebuilt anyway**. The other members keep their on-drive buffer.
+Since October 2026 this repository has tools that convert a member between the
+two layouts **without reformatting and without a rebuild**, in a few minutes
+per member, while the pool stays online: see
+[09, section 2](09-cache-devices-fixes-results.md#2-attaching-and-detaching-a-cache-device-without-a-rebuild).
+They need the patched dm-zoned module ([09, section 4](09-cache-devices-fixes-results.md#4-bugs-found-and-the-patches)).
+Without them, adding or removing a cache means re-formatting the member and a
+full rebuild, and the cheap moment is a drive replacement.
 
 ### 3.3 How to set it up
 
@@ -239,19 +236,23 @@ UI switch** for this any more.
 Setting it to 0 fixed the rebuild (measurements below). It also has a cost: with 0, a
 DSM Data Scrubbing (btrfs scrub) put both NVMe cache SSDs at 100 % busy while the hard drives
 sat at ~20 %, because the scrub's long sequential read stream was inserted into the cache.
-Setting 524288 (512 MiB) brought the SSDs back to normal at once. The value the author keeps:
+Setting 524288 (512 MiB) brought the SSDs back to normal at once. **Update, October 2026:
+with every member cached, the default 1024 measured best** (1.5 TiB in 5.1 h vs ~5¾ h at
+524288; the NVMe insert path tops out near 170 MB/s, the NAS HDDs take the cache disks'
+streams faster), and it keeps scrubs out of the cache: [09, section 3](09-cache-devices-fixes-results.md#3-measured-plain-members-vs-cached-members).
+The author now keeps **1024 in every situation except possibly a rebuild while the NAS is itself rebuilding**.
 
 | Situation | `skip_seq_thresh_kb` |
 |---|---|
-| No member has a cache device | **1024** (DSM's default): a Btrfs scrub is then skipped and reads straight from the drives |
-| A member has a cache device, normal operation | **524288** (512 MiB): zone-sized bursts (256 MiB) from the cache disks are cached. A DSM Data Scrubbing in this state is **not** skipped (its 64 KiB reads with many in flight never form a 512 MiB stream): measured 2026-10-03, every scrub block was inserted into the cache, the NVMe pair was 96 % busy at 185 MB/s, 200,000 cached blocks were evicted per minute and the scrub was throttled to ~184 MB/s with the drives 16 % busy. Pause the scrub, or set 1024 and lose the zone-burst caching meanwhile |
-| A guest member rebuilds onto a dm-zoned cache device | **0** for the duration (one stream across hundreds of GB), then back |
+| Normal operation, with or without cache devices | **1024** (DSM's default): a Btrfs scrub is then skipped and reads straight from the drives |
+| (Earlier choice, superseded) a member has a cache device | 524288 (512 MiB): zone-sized bursts (256 MiB) from the cache disks are cached. A DSM Data Scrubbing in this state is **not** skipped (its 64 KiB reads with many in flight never form a 512 MiB stream): measured 2026-10-03, every scrub block was inserted into the cache, the NVMe pair was 96 % busy at 185 MB/s, 200,000 cached blocks were evicted per minute and the scrub was throttled to ~184 MB/s with the drives 16 % busy. Pause the scrub, or set 1024 and lose the zone-burst caching meanwhile |
+| A guest member rebuilds onto a dm-zoned cache device while the NAS also rebuilds its own RAID | 0 was needed on 2026-09-29 (8 → 92–178 MB/s); with a quiet NAS 1024 is untested for a rebuild but measured best for writes |
 | Rebuild and scrub at once | avoid; schedule them apart |
 
 ```sh
 K='dev.flashcache_shared_cache_vg1_alloc_cache_1+volume_1.skip_seq_thresh_kb'
-sysctl -w "$K=524288"                                     # normal
-sysctl -w "$K=0"                                          # only during a cached member rebuild
+sysctl -w "$K=1024"                                       # normal (DSM default)
+sysctl -w "$K=0"                                          # only if a cached member rebuild needs it
 dmsetup table cachedev_0 | grep -i "skip sequential"      # → skip sequential thresh(...K)
 ```
 
@@ -284,17 +285,17 @@ while the guest's cache disks were busy. At normal priority the NAS rebuilt at
 
 ## 6. What is still untested
 
-- Moving a dm-zoned cache device to another device (section 3.2).
+- Moving a dm-zoned cache device to another device without the tools in 09
+  (a byte-exact copy while the pool is stopped should work).
 - Removing the volume cache with the `cleaner` policy (section 4.3).
 - Whether DSM runs the Task Scheduler boot-up task at boot (section 5). On the
   reference NAS a boot-up task for another purpose never ran in September 2026.
 - A crash with dirty data in the write-back volume cache. dm-cache persists its
   metadata, but no power-cut or forced-reset test has been done yet.
-- Everyday write throughput with all members cached. Only one member has a
-  cache device.
-- Whether the 7.2.6 idle-drain stall
-  ([05, section 1.2.1](05-operations-monitoring-performance.md#121-the-idle-drain-can-stall-kernel-726-install-the-reclaim-kick))
-  also happens on a member with a cache device.
+- (Done in October: all three members cached, measured in
+  [09, section 3](09-cache-devices-fixes-results.md#3-measured-plain-members-vs-cached-members).)
+- (The 7.2.6 idle-drain stall is a dm-zoned bug, fixed by the patch in
+  [09, section 4.2](09-cache-devices-fixes-results.md#42-dm-zoned-the-reclaim-worker-stops-polling-same-patch-hunk-3).)
 
 ## Other pages
 
@@ -304,4 +305,5 @@ while the guest's cache disks were busy. At normal priority the NAS rebuilt at
 [04 — OpenMediaVault and Synology integration](04-openmediavault-and-synology-integration.md) ·
 [05 — Operations, monitoring, performance](05-operations-monitoring-performance.md) ·
 [06 — Alternatives and lessons](06-alternatives-and-lessons.md) ·
-[07 — Prior art](07-prior-art.md)
+[07 — Prior art](07-prior-art.md) ·
+[09 — Cache devices without a rebuild, fixes, results](09-cache-devices-fixes-results.md)

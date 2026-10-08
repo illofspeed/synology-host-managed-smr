@@ -1,0 +1,48 @@
+--- a/drivers/md/dm-zoned-reclaim.c
++++ b/drivers/md/dm-zoned-reclaim.c
+@@ -290,7 +290,15 @@
+ again:
+ 	szone = dmz_alloc_zone(zmd, zrc->dev_idx,
+ 			       alloc_flags | DMZ_ALLOC_RECLAIM);
+-	if (!szone && alloc_flags == DMZ_ALLOC_SEQ && dmz_nr_cache_zones(zmd)) {
++	/*
++	 * Without a free sequential zone, moving a CACHE zone into a random
++	 * zone of the zoned device still frees cache space. Moving a RANDOM
++	 * zone into another random zone gains nothing: when the target is
++	 * idle this repeats forever on the same zone (full-speed copying on
++	 * an otherwise idle drive). Only fall back for cache zones.
++	 */
++	if (!szone && alloc_flags == DMZ_ALLOC_SEQ && dmz_nr_cache_zones(zmd) &&
++	    dmz_is_cache(dzone)) {
+ 		alloc_flags = DMZ_ALLOC_RND;
+ 		goto again;
+ 	}
+@@ -542,9 +550,27 @@
+ 	if (ret && ret != -EINTR) {
+ 		if (!dmz_check_dev(zmd))
+ 			return;
++		if (ret == -ENOSPC) {
++			/*
++			 * No zone to copy into: nothing can progress now.
++			 * Rescheduling immediately would spin; poll instead.
++			 */
++			mod_delayed_work(zrc->wq, &zrc->work, DMZ_IDLE_PERIOD);
++			return;
++		}
+ 	}
+ 
+-	dmz_schedule_reclaim(zrc);
++	/*
++	 * Keep the worker alive: when a pass ends while the target is busy
++	 * with enough free zones, dmz_schedule_reclaim() queues nothing and
++	 * the idle poll is never re-armed, so a buffer filled under load is
++	 * not drained once the target goes idle (until an external
++	 * "reclaim" message). Poll again after the idle period instead.
++	 */
++	if (dmz_should_reclaim(zrc, dmz_reclaim_percentage(zrc)))
++		mod_delayed_work(zrc->wq, &zrc->work, 0);
++	else
++		mod_delayed_work(zrc->wq, &zrc->work, DMZ_IDLE_PERIOD);
+ }
+ 
+ /*

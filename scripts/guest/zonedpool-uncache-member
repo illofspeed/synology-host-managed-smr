@@ -1,0 +1,105 @@
+#!/bin/bash
+# zonedpool-uncache-member <dzN>
+# Detach the dm-zoned cache device of ONE md member (listed with a third field in dmzoned.conf) without a
+# rebuild: the member leaves the array, its recorded size is set to the plain size, the cache is drained
+# outside the array, dmz-uncache.py moves the metadata back onto the drive's conventional zones,
+# `dmzadm --check` must report no error, dmzoned.conf loses the third field, and `mdadm --re-add` brings it back.
+# Environment: ZP_MD (default $MDN), ZP_TOOLS (dir with dmz-uncache.py, default /usr/local/sbin).
+# Log: /var/log/zonedpool-uncache.log. A file /run/zonedpool-STOP makes it refuse to start (to stop a chain of
+# several members between two of them without killing a running conversion).
+set -u
+[ -e /run/zonedpool-STOP ] && { echo "$(date '+%F %T') STOP file present - not starting ($*)" >> /var/log/zonedpool-uncache.log; exit 3; }
+exec >>/var/log/zonedpool-uncache.log 2>&1
+log()  { echo "$(date '+%F %T') $*"; }
+stop() { log "STOP: $*"; exit 3; }
+
+M=${1:?member name as in dmzoned.conf}
+CONF=/etc/zonedpool/dmzoned.conf; Z=$(awk -v m="$M" '$2==m{print $1}' "$CONF"); C=$(awk -v m="$M" '$2==m{print $3}' "$CONF")
+CONV=${ZP_TOOLS:-/usr/local/sbin}/dmz-uncache.py
+BK=/root/dmz-uncache-backup-$M-$(date +%Y%m%d-%H%M)
+MDN=${ZP_MD:-md127}; MD=/sys/block/$MDN/md
+
+log "=== uncache $M (cache $C)"
+# ---------- gates ----------
+[ -b "$Z" ] && [ -b "$C" ] || stop "drive or cache device missing"
+[ -r "$CONV" ] || stop "no $CONV"
+grep -A1 "^$MDN" /proc/mdstat | grep -q '\[3/3\] \[UUU\]' || stop "$MDN not [UUU]"
+mdadm --detail /dev/$MDN | grep -q 'Intent Bitmap : Internal' || stop "$MDN has no internal bitmap"
+[ "$(cat $MD/sync_action)" = idle ] || stop "$MDN sync_action is not idle"
+tbl=$(dmsetup table $M) || stop "no $M target"
+case "$tbl" in *" zoned "*" "*) ;; *) stop "$M is not a 2-device (cached) target: $tbl";; esac
+dzdev=$(basename "$(readlink -f /dev/mapper/$M)")
+[ -e "$MD/dev-$dzdev" ] || stop "$M ($dzdev) is not an $MDN member"
+comp=$(cat $MD/component_size)
+WANT_SZ=$(( $(cat $MD/dev-$dzdev/offset) + 2 * comp ))   # what md needs: data offset + data size (sectors)
+[ "$(df --output=avail -k / | tail -1)" -gt 10000000 ] || stop "less than 10 GB free on /"
+[ -b "$Z" ] && [ -b "$C" ] || stop "drive or cache for $M missing in $CONF"
+grep -qE "^$Z +$M +$C *$" "$CONF" || stop "unexpected $M line in $CONF"
+log "gates OK: $M=$dzdev table='$tbl' rdev size $(cat $MD/dev-$dzdev/size) KiB, component $comp KiB"
+
+# ---------- 1. md: record the plain size for member ----------
+echo "$comp" > "$MD/dev-$dzdev/size" || stop "could not set dev-$dzdev/size"
+[ "$(cat $MD/dev-$dzdev/size)" = "$comp" ] || stop "dev-$dzdev/size did not change"
+log "md: dev-$dzdev/size = $comp KiB"
+
+# ---------- 2. fail + remove member ----------
+mdadm /dev/$MDN --fail /dev/mapper/$M || stop "fail refused"
+for t in 1 2 3 4 5 6 7 8 9 10; do mdadm /dev/$MDN --remove /dev/mapper/$M 2>/dev/null && break; sleep 5; done
+[ -e "$MD/dev-$dzdev" ] && stop "$M still in $MDN"
+log "$M out of $MDN: $(grep -A1 "^$MDN" /proc/mdstat | tail -1 | tr -s ' ')"
+
+# ---------- 3. drain member outside md, gate on the converter's dry run ----------
+ok=0
+for round in 1 2 3 4 5 6; do
+  dmsetup message $M 0 reclaim
+  t=0; until dmsetup status $M | grep -qE ' ([0-9]+)/\1 cache'; do sleep 10; t=$((t+1)); [ $t -lt 180 ] || break; done
+  sleep 30
+  dmsetup status $M | grep -qE ' ([0-9]+)/\1 cache' || { log "round $round: cache not drained yet"; continue; }
+  dmsetup remove $M || stop "dmsetup remove $M failed"
+  out=$(python3 "$CONV" --cache "$C" --zoned "$Z" --dry-run 2>&1)
+  if ! echo "$out" | grep -q "precondition"; then
+    echo "$out" | grep -vE "^WARNING: /dev" | sed 's/^/  dry-run: /'
+    echo "$out" | grep -q "DRY RUN: nothing written" && { ok=1; break; }
+    stop "dry run failed ($M removed; restart: dmsetup create $M --table \"0 \$(blockdev --getsz $Z) zoned $C $Z\")"
+  fi
+  log "round $round: dry run reports preconditions, re-draining"
+  echo "$out" | grep -E "^  - " | head -5
+  dmsetup create $M --table "0 $(blockdev --getsz $Z) zoned $C $Z" || stop "could not restart the 2-device $M"
+done
+[ $ok = 1 ] || stop "$M did not drain (2-device $M left running, out of md)"
+log "drained; $M target removed"
+
+# ---------- 4. convert ----------
+t0=$(date +%s)
+python3 "$CONV" --cache "$C" --zoned "$Z" --backup-dir "$BK" ||
+  stop "CONVERTER FAILED rc=$? - $M out of md; rollback data in $BK"
+log "converter finished in $(( $(date +%s) - t0 )) s; backups in $BK"
+
+# ---------- 5. offline check ----------
+chk=$(dmzadm --check "$Z" 2>&1 | tail -1)
+log "dmzadm --check: $chk"
+[ "$chk" = "No error detected" ] || stop "plain metadata not clean - $M out of md; rollback data in $BK"
+
+# ---------- 6. config: member is plain from now on ----------
+cp -a "$CONF" "$CONF.bak-pre-uncache-$(date +%Y%m%d-%H%M)"
+sed -i -E "s#^($Z +$M) +$C *\$#\1#" "$CONF"
+grep -qE "^$Z +$M *$" "$CONF" || stop "$CONF not updated"
+log "$CONF: $M line now plain"
+
+# ---------- 7. plain member ----------
+dmsetup create $M --table "0 $(blockdev --getsz "$Z") zoned $Z" || stop "create plain $M failed"
+sz=$(blockdev --getsz /dev/mapper/$M)
+log "plain $M: $(dmsetup status $M | cut -d' ' -f4-) | size $sz"
+[ "$sz" = "$WANT_SZ" ] || stop "plain $M size $sz != $WANT_SZ - NOT re-added"
+
+# ---------- 8. re-add + bitmap resync ----------
+t1=$(date +%s)
+mdadm /dev/$MDN --re-add /dev/mapper/$M || stop "RE-ADD REFUSED - pool left degraded on dz1+dz3"
+sleep 5
+while [ "$(cat $MD/sync_action)" != idle ]; do sleep 5; done
+log "re-added, resync done in $(( $(date +%s) - t1 )) s: $(grep -A1 "^$MDN" /proc/mdstat | tail -1 | tr -s ' ')"
+grep -A1 "^$MDN" /proc/mdstat | grep -q '\[3/3\] \[UUU\]' || stop "$MDN not [UUU] after the re-add"
+
+# ---------- 9. end-to-end proof: md check in the background ----------
+for m in $(awk '$1 ~ /^\/dev/ {print $2}' "$CONF"); do log "$m: $(dmsetup status $m | cut -d' ' -f4-)"; done
+log "=== uncache $M done"

@@ -1,0 +1,83 @@
+#!/bin/bash
+# zonedpool-encache-member <dzN> <cache device>
+# Attach a dm-zoned cache device to ONE plain md member WITHOUT a rebuild: the member leaves the array
+# (pool degraded on the others for a few minutes), its dm-zoned metadata moves onto the cache device
+# (dmz-encache.py), the result is checked, /etc/zonedpool/dmzoned.conf gets the third field, and the
+# member returns with `mdadm --re-add` (internal write-intent bitmap required: seconds, not a rebuild).
+# Requires the patched dm-zoned (patches/dm-zoned-reclaim.patch): with the stock module a cached member
+# with no free sequential zone copies random zone -> random zone forever while idle (docs/09).
+# Environment: ZP_MD (default $MDN), ZP_TOOLS (dir with dmz-encache.py, default /usr/local/sbin),
+# ZP_DMZADM (a dmzadm with patches/dmzadm-check-conv-zones.patch; stock 2.2.2 segfaults on 2-device sets),
+# ZP_DMZ_SRCVERSION (optional: refuse unless /sys/module/dm_zoned/srcversion equals it).
+# Log: /var/log/zonedpool-encache.log. Stops at every gate; before the re-add a failure leaves the member
+# OUT of the array (pool usable, degraded) with backups in $BK (rollback: restore the drive's first
+# metadata zones from $BK/drive-zones-*.bin and start the plain target).
+set -u
+exec >>/var/log/zonedpool-encache.log 2>&1
+log()  { echo "$(date '+%F %T') $*"; }
+stop() { log "STOP ($M): $*"; exit 3; }
+
+M=${1:?member name as in dmzoned.conf}; C=${2:?cache device, preferably a /dev/disk/by-id path}
+ENC=${ZP_TOOLS:-/usr/local/sbin}/dmz-encache.py
+DMZADM=${ZP_DMZADM:-/usr/local/sbin/dmzadm-fixed}
+CONF=/etc/zonedpool/dmzoned.conf
+MDN=${ZP_MD:-md127}; MD=/sys/block/$MDN/md
+BK=/root/dmz-encache-backup-$M-$(date +%Y%m%d-%H%M)
+
+log "=== encache $M with $C"
+# ---------- gates ----------
+[ -z "${ZP_DMZ_SRCVERSION:-}" ] || [ "$(cat /sys/module/dm_zoned/srcversion)" = "$ZP_DMZ_SRCVERSION" ] || stop "dm-zoned srcversion $(cat /sys/module/dm_zoned/srcversion) is not the patched $ZP_DMZ_SRCVERSION"
+[ -r "$ENC" ] || stop "no $ENC"
+[ -x "$DMZADM" ] || stop "no fixed dmzadm"
+Z=$(awk -v m="$M" '$2==m{print $1}' "$CONF"); [ -b "$Z" ] || stop "no drive for $M in $CONF"
+[ "$(awk -v m="$M" '$2==m{print NF}' "$CONF")" = 2 ] || stop "$M already has a cache field in $CONF"
+case "$C" in /dev/disk/by-id/*) ;; *) log "WARNING: $C is not a /dev/disk/by-id path (kernel names can change at boot)";; esac
+[ -b "$C" ] || stop "cache device $C missing"
+cname=$(basename "$(readlink -f "$C")")
+[ -z "$(ls /sys/class/block/$cname/holders 2>/dev/null)" ] || stop "cache device is in use: $(ls /sys/class/block/$cname/holders)"
+grep -q "$C" "$CONF" && stop "cache device already listed in $CONF"
+csz=$(blockdev --getsize64 "$C"); [ $((csz % 268435456)) = 0 ] || stop "cache size $csz is not a multiple of 256 MiB"
+grep -A1 "^$MDN" /proc/mdstat | grep -q '\[3/3\] \[UUU\]' || stop "$MDN not [UUU]"
+mdadm --detail /dev/$MDN | grep -q 'Intent Bitmap : Internal' || stop "no internal bitmap"
+[ "$(cat $MD/sync_action)" = idle ] || stop "$MDN busy ($(cat $MD/sync_action))"
+tbl=$(dmsetup table "$M") || stop "no $M target"
+case "$tbl" in *" zoned "*" "*) stop "$M is already cached: $tbl";; esac
+dzdev=$(basename "$(readlink -f /dev/mapper/$M)"); [ -e "$MD/dev-$dzdev" ] || stop "$M is not an $MDN member"
+[ "$(df --output=avail -k / | tail -1)" -gt 10000000 ] || stop "less than 10 GB free on /"
+log "gates OK: $M=$dzdev drive $Z, cache $C ($((csz >> 30)) GiB), table '$tbl'"
+
+# ---------- out of md ----------
+mdadm /dev/$MDN --fail /dev/mapper/$M || stop "fail refused"
+for t in $(seq 10); do mdadm /dev/$MDN --remove /dev/mapper/$M 2>/dev/null && break; sleep 5; done
+[ -e "$MD/dev-$dzdev" ] && stop "$M still in $MDN"
+log "$M out of $MDN: $(grep -A1 "^$MDN" /proc/mdstat | tail -1 | tr -s ' ')"
+
+# ---------- drain outside md (buffer zones must be merged), gate on the dry run ----------
+ok=0
+for round in $(seq 1 12); do
+  dmsetup message "$M" 0 reclaim; sleep 60
+  dmsetup remove "$M" || stop "dmsetup remove $M failed"
+  out=$(python3 "$ENC" --cache "$C" --zoned "$Z" --dry-run 2>&1)
+  if echo "$out" | grep -q "DRY RUN"; then echo "$out" | grep -E "^(plain|cached|mapped)" | sed 's/^/  dry: /'; ok=1; break; fi
+  log "round $round: $(echo "$out" | grep -E '^  - |ABORT' | head -2 | tr '\n' ' ')"
+  dmsetup create "$M" --table "0 $(blockdev --getsz "$Z") zoned $Z" || stop "could not restart plain $M"
+done
+[ $ok = 1 ] || stop "$M did not drain (plain target left running, out of md)"
+
+# ---------- convert ----------
+python3 "$ENC" --cache "$C" --zoned "$Z" --backup-dir "$BK" | sed 's/^/  enc: /' || stop "encache FAILED - $M out of md, backups in $BK"
+chk=$("$DMZADM" --check "$C" "$Z" 2>&1 | tail -1); log "dmzadm --check (fixed build, 2 devices): $chk"
+[ "$chk" = "No error detected" ] || stop "cached metadata not clean - $M out of md, rollback data in $BK"
+cp -a "$CONF" "$CONF.bak-pre-encache-$M-$(date +%Y%m%d-%H%M)"
+sed -i -E "s#^($Z +$M) *\$#\1  $C#" "$CONF"
+grep -qE "^$Z +$M +$C *$" "$CONF" || stop "$CONF not updated"
+dmsetup create "$M" --table "0 $(blockdev --getsz "$Z") zoned $C $Z" || stop "create cached $M failed"
+log "cached $M: $(dmsetup status $M | cut -d' ' -f4-) | size $(blockdev --getsz /dev/mapper/$M)"
+
+# ---------- back into md ----------
+t1=$(date +%s)
+mdadm /dev/$MDN --re-add /dev/mapper/$M || stop "RE-ADD REFUSED - pool degraded on two members"
+sleep 5; while [ "$(cat $MD/sync_action)" != idle ]; do sleep 5; done
+log "re-added, resync $(( $(date +%s) - t1 )) s: $(grep -A1 "^$MDN" /proc/mdstat | tail -1 | tr -s ' ')"
+grep -A1 "^$MDN" /proc/mdstat | grep -q '\[3/3\] \[UUU\]' || stop "$MDN not [UUU] after the re-add"
+log "=== encache $M done (backups $BK)"
