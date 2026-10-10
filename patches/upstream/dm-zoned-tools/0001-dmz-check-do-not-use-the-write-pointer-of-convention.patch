@@ -21,6 +21,9 @@ moved chunks into conventional zones (stock 2.2.2: exit 139; with the
 patch: "No error detected", also on an emulated ZBC drive with the same
 layout).
 
+Reproducer (scsi_debug zbc=managed, no special hardware):
+https://github.com/illofspeed/synology-host-managed-smr/blob/main/repro/1-dmzadm-check-two-devices.sh
+
 Assisted-by: LLM
 ---
  src/dmz_check.c | 13 +++++++++++--
