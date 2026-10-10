@@ -5,3 +5,13 @@ The same fixes as the combined patches in `patches/`, split and formatted for th
 `dm-zoned-tools/` (1, GitHub pull request). Based on torvalds/linux master and dm-zoned-tools master of 2026-10-08.
 `Signed-off-by` is added by the submitter at send time; AI assistance is disclosed with `Assisted-by`, as
 `Documentation/process/coding-assistants.rst` requires.
+
+## Status
+
+| Series | Sent | Where |
+|---|---|---|
+| `dm-zoned-reclaim/` (0/3 + 3) | 2026-10-10 to dm-devel, the device-mapper maintainers, Hannes Reinecke, Damien Le Moal, LKML | [lore](https://lore.kernel.org/dm-devel/20261010105122.398-1-volvo.mail@gmail.com/), [patchwork](https://patchwork.kernel.org/series/1182929/) |
+| `libahci-fbs/` | not yet: waits for a real hot-plug test | — |
+| `dm-zoned-tools/` | not yet: GitHub issue + pull request | — |
+
+The series was sent as prepared by `prepare-dm-zoned-series.sh` (apply on master, sign off, checkpatch, format).

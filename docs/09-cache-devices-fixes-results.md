@@ -130,6 +130,10 @@ kept with the author's notes; the benchmark script records drive bytes, cache fi
 
 ## 4. Bugs found, and the patches
 
+The two dm-zoned fixes (4.1, 4.2) were sent upstream on 2026-10-10 as a three-patch series:
+[[PATCH 0/3] dm zoned: fix two idle reclaim problems](https://lore.kernel.org/dm-devel/20261010105122.398-1-volvo.mail@gmail.com/) on dm-devel. The split series
+is in [`patches/upstream/`](../patches/upstream/).
+
 All three patches are against the versions the reference system runs (kernel 7.2.6 = upstream master for
 the changed functions in October 2026; dm-zoned-tools 2.2.2 = master). They were built out of tree in the lab
 VM against the Ubuntu mainline headers; the exported symbol versions matched, so the stock `ahci.ko` loads on
