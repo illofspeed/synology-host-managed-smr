@@ -1,5 +1,5 @@
 From 9df4d1ecaf6b171a608159e180d60c79f7f4b473 Mon Sep 17 00:00:00 2001
-From: illofspeed <volvo.mail@gmail.com>
+From: illofspeed <22580385+illofspeed@users.noreply.github.com>
 Date: Thu, 8 Oct 2026 20:39:58 +0000
 Subject: [PATCH] ata: libahci: re-enable FBS after error handling on a port
  multiplier

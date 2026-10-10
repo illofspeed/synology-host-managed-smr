@@ -17,7 +17,7 @@ git notes add -f -m "The addresses in README.md are out of date (wdc.com, dm-dev
 hence this goes to dlemoal@kernel.org and dm-devel@lists.linux.dev.
 
 Related kernel series (dm-zoned idle reclaim):
-https://lore.kernel.org/dm-devel/20261010105122.398-1-volvo.mail@gmail.com/" HEAD
+https://lore.kernel.org/dm-devel/?q=s%3A%22dm+zoned%3A+fix+two+idle+reclaim+problems%22" HEAD
 rm -f ../out-dmzadm/*.patch
 git format-patch -q --notes --subject-prefix="PATCH dm-zoned-tools" -o ../out-dmzadm HEAD~1
 echo "=== ready to send:"; ls -1 ../out-dmzadm

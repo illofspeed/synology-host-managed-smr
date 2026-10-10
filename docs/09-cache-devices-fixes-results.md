@@ -131,7 +131,7 @@ kept with the author's notes; the benchmark script records drive bytes, cache fi
 ## 4. Bugs found, and the patches
 
 The two dm-zoned fixes (4.1, 4.2) were sent upstream on 2026-10-10 as a three-patch series:
-[[PATCH 0/3] dm zoned: fix two idle reclaim problems](https://lore.kernel.org/dm-devel/20261010105122.398-1-volvo.mail@gmail.com/) on dm-devel. The split series
+[[PATCH 0/3] dm zoned: fix two idle reclaim problems](https://lore.kernel.org/dm-devel/?q=s%3A%22dm+zoned%3A+fix+two+idle+reclaim+problems%22) on dm-devel. The split series
 is in [`patches/upstream/`](../patches/upstream/).
 
 All three patches are against the versions the reference system runs (kernel 7.2.6 = upstream master for
@@ -164,7 +164,7 @@ pool the emptied buffers were freed within six minutes of going idle, without th
 ### 4.3 `dmzadm --check/--repair` segfault on two-device sets (`patches/dmzadm-check-conv-zones.patch`)
 
 Sent to the maintainer and dm-devel on 2026-10-10:
-[[PATCH dm-zoned-tools] dmz: check: do not use the write pointer of conventional zones](https://lore.kernel.org/dm-devel/20261010110553.379-1-volvo.mail@gmail.com/).
+[[PATCH dm-zoned-tools] dmz: check: do not use the write pointer of conventional zones](https://lore.kernel.org/dm-devel/?q=s%3A%22dmz%3A+check%3A+do+not+use+the+write+pointer%22).
 
 In `dmz_check_mapped_zone_bitmap()` the write-pointer test runs for every mapped zone that is not a "cache"
 zone, and with two devices `dmz_zone_is_cache()` only matches the cache device's zones. A chunk mapped to a
@@ -189,7 +189,7 @@ Tested on a real hot-plug on 2026-10-10: a drive inserted into a free bay of a m
 `re-enabling FBS after error handling` and "FBS is enabled". Two other drives in that group then read
 259 + 259 MB/s in parallel (one alone: 268 MB/s), so FBS was really back on.
 Sent to linux-ide the same day: [[PATCH] ata: libahci: re-enable FBS after error handling on a port
-multiplier](https://lore.kernel.org/linux-ide/20261010115727.401-1-volvo.mail@gmail.com/).
+multiplier](https://lore.kernel.org/linux-ide/?q=s%3A%22re-enable+FBS+after+error+handling%22).
 
 ### 4.5 Reproducers
 

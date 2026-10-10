@@ -1,5 +1,5 @@
 From 8b86f30048580379ffce619e9ea4e63a815511fd Mon Sep 17 00:00:00 2001
-From: illofspeed <volvo.mail@gmail.com>
+From: illofspeed <22580385+illofspeed@users.noreply.github.com>
 Date: Thu, 8 Oct 2026 20:41:07 +0000
 Subject: [PATCH] dmz: check: do not use the write pointer of conventional
  zones
