@@ -188,6 +188,8 @@ Tested on a real hot-plug on 2026-10-10: a drive inserted into a free bay of a m
 "FBS is disabled", "softreset failed (device not ready)" and the hard reset, then
 `re-enabling FBS after error handling` and "FBS is enabled". Two other drives in that group then read
 259 + 259 MB/s in parallel (one alone: 268 MB/s), so FBS was really back on.
+Sent to linux-ide the same day: [[PATCH] ata: libahci: re-enable FBS after error handling on a port
+multiplier](https://lore.kernel.org/linux-ide/20261010115727.401-1-volvo.mail@gmail.com/).
 
 ### 4.5 Reproducers
 
