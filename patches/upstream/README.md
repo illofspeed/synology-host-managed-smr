@@ -14,7 +14,8 @@ The same fixes as the combined patches in `patches/`, split and formatted for th
 | `libahci-fbs/` | 2026-10-10 to linux-ide, Damien Le Moal, Niklas Cassel, LKML (after the hot-plug test passed the same day) | [lore](https://lore.kernel.org/linux-ide/?q=s%3A%22re-enable+FBS+after+error+handling%22) |
 | `dm-zoned-tools/` | 2026-10-10 to Damien Le Moal, dm-devel, Hannes Reinecke (by mail, as the project's README asks; prepared by `prepare-dmzadm-patch.sh`) | [lore](https://lore.kernel.org/dm-devel/?q=s%3A%22dmz%3A+check%3A+do+not+use+the+write+pointer%22) |
 
-Links point to a subject search in the list archives. In these copies the author address is the GitHub no-reply
+All three were resent as **v2** on 2026-10-10 from the submitter's new address (no code changes); the subject
+searches below find both versions. Links point to a subject search in the list archives. In these copies the author address is the GitHub no-reply
 address (the mails themselves went out from the submitter's own address); the prepare scripts are kept for
 reproduction, a v2 would be prepared in the submitter's own tree.
 
