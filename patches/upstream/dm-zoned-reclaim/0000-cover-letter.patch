@@ -1,0 +1,57 @@
+From fbe474c5d2dda5db94a7a3fcec6399960f8aa261 Mon Sep 17 00:00:00 2001
+From: illofspeed <volvo.mail@gmail.com>
+Date: Thu, 8 Oct 2026 20:40:52 +0000
+Subject: [PATCH 0/3] dm zoned: fix two idle reclaim problems
+
+These patches fix two problems in dm-zoned's reclaim worker, found while
+running md RAID5 on three dm-zoned targets on 27 TB host-managed SMR drives
+(WD Ultrastar DC HC680), each target with a regular cache device.
+
+1. On a target with cache zones and no free sequential zone, an idle
+   target keeps copying random zones into other random zones, forever
+   (patch 2; patch 1 makes the resulting -ENOSPC back off instead of
+   spinning). After a full md rebuild every chunk is mapped, so this
+   happens right after a rebuild: the idle member read and wrote about
+   72 MB/s nonstop for hours.
+
+2. After a reclaim pass that ends while the target is busy, the idle poll
+   is never re-armed, so zones filled under load are not reclaimed when the
+   target goes idle (patch 3). Users notice it as "the buffer never drains";
+   the workaround has been a timer sending "dmsetup message <dev> 0 reclaim".
+
+Testing: the three patches were built as an out-of-tree dm-zoned module for
+7.2.6 (the changed code is identical in current master) and tested
+- on emulated host-managed drives (tcmu-runner ZBC handler) in a VM: the
+  idle copy loop reproduced with the stock module (340 MB/s on an idle
+  target, zone counters unchanged), 0 MB/s with the patches;
+- on the three real drives since 2026-10-05: crash test, three 1.5 TiB
+  write benchmarks, and eight conversions between single-device and
+  cache-device layouts; emptied zones were reclaimed within minutes of the
+  targets going idle without the reclaim timer.
+- with a reproducer that needs no special hardware (scsi_debug zbc=managed,
+  64 MiB zones, plus a 1 GiB loop cache device): stock module ~600 MB/s of
+  read+write on the idle target with unchanged zone counters, patched
+  module 0 MB/s:
+  https://github.com/illofspeed/synology-host-managed-smr/tree/main/repro
+Not done: a test on current master itself (only 7.2.6), and a rebuild onto a
+cached member with the patches (the first problem was seen after a rebuild
+with the stock module).
+
+Related, not addressed here: the double-free in dmz_load_sb() reported on
+dm-devel on 2026-05-30.
+
+The problems were found and the patches written with the help of an AI
+coding assistant (hence Assisted-by); the analysis, the tests on real
+hardware and this description were reviewed by me.
+
+illofspeed (3):
+  dm zoned: back off when reclaim finds no destination zone
+  dm zoned: do not reclaim a random zone into another random zone
+  dm zoned: keep polling for idle reclaim after a reclaim pass
+
+ drivers/md/dm-zoned-reclaim.c | 28 ++++++++++++++++++++++++++--
+ 1 file changed, 26 insertions(+), 2 deletions(-)
+
+-- 
+2.47.3
+

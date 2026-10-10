@@ -1,0 +1,55 @@
+From fbe474c5d2dda5db94a7a3fcec6399960f8aa261 Mon Sep 17 00:00:00 2001
+From: illofspeed <volvo.mail@gmail.com>
+Date: Thu, 8 Oct 2026 20:39:58 +0000
+Subject: [PATCH 3/3] dm zoned: keep polling for idle reclaim after a reclaim
+ pass
+
+dmz_reclaim_work() re-arms its DMZ_IDLE_PERIOD poll only when
+dmz_should_reclaim() returns false at the start of a pass. After a pass
+it calls dmz_schedule_reclaim(), which queues the work only if reclaim
+is needed right now. When a pass ends while the target is still busy and
+has enough free zones, nothing is queued at all. Once the target goes
+idle, nothing re-evaluates dmz_should_reclaim() until new I/O arrives or
+user space sends a "reclaim" message, so the random or cache zones that
+filled up under load stay full.
+
+Seen on md RAID5 members on 27 TB host-managed drives: after heavy
+writes the random zones stayed full for hours on idle targets; the
+workaround was a timer sending "dmsetup message <dev> 0 reclaim". With
+this patch the emptied and filled zones were reclaimed within minutes of
+the targets going idle, without the timer.
+
+After a pass, requeue the work immediately if reclaim is still needed,
+otherwise re-arm the idle poll.
+
+Fixes: 3b1a94c88b79 ("dm zoned: drive-managed zoned block device target")
+Assisted-by: LLM
+---
+ drivers/md/dm-zoned-reclaim.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/md/dm-zoned-reclaim.c b/drivers/md/dm-zoned-reclaim.c
+index 2bcc163..7feb262 100644
+--- a/drivers/md/dm-zoned-reclaim.c
++++ b/drivers/md/dm-zoned-reclaim.c
+@@ -557,7 +557,16 @@ static void dmz_reclaim_work(struct work_struct *work)
+ 		}
+ 	}
+ 
+-	dmz_schedule_reclaim(zrc);
++	/*
++	 * Keep the worker alive: when a pass ends while the target is busy
++	 * with enough free zones, dmz_schedule_reclaim() queues nothing and
++	 * the idle poll is never re-armed, so zones filled under load are not
++	 * reclaimed once the target goes idle.
++	 */
++	if (dmz_should_reclaim(zrc, dmz_reclaim_percentage(zrc)))
++		mod_delayed_work(zrc->wq, &zrc->work, 0);
++	else
++		mod_delayed_work(zrc->wq, &zrc->work, DMZ_IDLE_PERIOD);
+ }
+ 
+ /*
+-- 
+2.47.3
+

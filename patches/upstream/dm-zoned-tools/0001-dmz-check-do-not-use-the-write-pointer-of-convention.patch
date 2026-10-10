@@ -1,0 +1,56 @@
+From 8b86f30048580379ffce619e9ea4e63a815511fd Mon Sep 17 00:00:00 2001
+From: illofspeed <volvo.mail@gmail.com>
+Date: Thu, 8 Oct 2026 20:41:07 +0000
+Subject: [PATCH] dmz: check: do not use the write pointer of conventional
+ zones
+
+With more than one device, dmz_zone_is_cache() only matches the zones of
+the regular (cache) device. A chunk mapped to a conventional zone of the
+zoned device therefore reaches the write pointer test in
+dmz_check_mapped_zone_bitmap(). The kernel reports the write pointer of a
+conventional zone as -1, so wp_block becomes garbage and the bitmap loop
+reads far past its two-block buffer: dmzadm --check segfaults
+("Checking zone bitmaps..." is the last line), and --repair could clear
+bits based on that memory before crashing.
+
+Treat conventional and emulated (regular-device) zones as having no write
+pointer: every block may be valid.
+
+Found on a cache-device + 27 TB host-managed drive set after reclaim had
+moved chunks into conventional zones (stock 2.2.2: exit 139; with the
+patch: "No error detected", also on an emulated ZBC drive with the same
+layout).
+
+Assisted-by: LLM
+---
+ src/dmz_check.c | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/src/dmz_check.c b/src/dmz_check.c
+index b13d025..943308b 100644
+--- a/src/dmz_check.c
++++ b/src/dmz_check.c
+@@ -509,9 +509,18 @@ static int dmz_check_mapped_zone_bitmap(struct dmz_dev *dev,
+ 	if (ret != 0)
+ 		return -1;
+ 
+-	/* No valid block should be present after the write pointer */
++	/*
++	 * No valid block should be present after the write pointer.
++	 * Conventional zones have no write pointer (the kernel reports -1):
++	 * every block may be valid. With more than one device,
++	 * dmz_zone_is_cache() only matches the cache device's zones, so the
++	 * zoned device's conventional zones reach this point.
++	 */
+ 	bad_bits = 0;
+-	wp_block = dmz_sect2blk(zone->wp - zone->start);
++	if (dmz_zone_conv(zone) || dmz_zone_unknown(zone))
++		wp_block = dev->zone_nr_blocks;
++	else
++		wp_block = dmz_sect2blk(zone->wp - zone->start);
+ 	for (b = 0; b < wp_block; b++) {
+ 		if (dmz_test_bit(dbuf, b))
+ 			dzone_weight++;
+-- 
+2.47.3
+
