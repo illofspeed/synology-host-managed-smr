@@ -184,6 +184,11 @@ reference system. The patch re-enables FBS at the end of `ahci_error_handler()` 
 still attached. Note that FBS was **not** the cause of the low write speed through a port multiplier
 (section 5.3); it matters for parallel reads.
 
+Tested on a real hot-plug on 2026-10-10: a drive inserted into a free bay of a multiplier group logged
+"FBS is disabled", "softreset failed (device not ready)" and the hard reset, then
+`re-enabling FBS after error handling` and "FBS is enabled". Two other drives in that group then read
+259 + 259 MB/s in parallel (one alone: 268 MB/s), so FBS was really back on.
+
 ### 4.5 Reproducers
 
 `repro/` reproduces the check segfault, the idle reclaim loop and the `dmzadm --repair` trap on a RAM-backed
@@ -260,7 +265,6 @@ SHR/RAID also has a second, RAID-level phase (`md2` repair) that reads the drive
   (September's 73–178 MB/s were measured with the NAS threshold at 0 while the NAS itself was rebuilding).
 - Spreading the members over several port multipliers (section 5.3).
 - A crash with cached members and a large amount of data in the cache devices.
-- The libahci patch on a real hot-plug (installed and loaded, not yet exercised).
 
 ## Other pages
 

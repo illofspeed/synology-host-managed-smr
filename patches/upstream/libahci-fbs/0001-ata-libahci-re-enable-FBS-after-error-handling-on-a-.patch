@@ -12,7 +12,8 @@ ready)"), EH escalates to a hardreset of the PMP link, and nothing turns
 FBS back on: only ahci_pmp_attach() does, which runs at the next boot.
 The port keeps working with command-based switching until then.
 
-Seen on a Marvell 88SE9235 with Marvell 88SM9705 port multipliers: after
+Seen on a Marvell 88SE9235 (1b4b:9235) with Marvell 88SM9705 port
+multipliers (1b4b:9705, in a Synology DX1222 expansion unit): after
 hot-plugging a drive, the kernel logged "FBS is disabled" followed by
 "softreset failed (device not ready)" and a PMP hardreset, and never
 "FBS is enabled" again (twice, on two different ports).
@@ -20,10 +21,14 @@ hot-plugging a drive, the kernel logged "FBS is disabled" followed by
 At the end of ahci_error_handler(), re-enable FBS if a PMP is still
 attached and FBS is supported but disabled.
 
-Tested: built against 7.2.6 as an out-of-tree libahci and loaded on the
-affected system (the stock ahci module binds to it, symbol CRCs are
-unchanged); normal operation and boot-time PMP attach work. The hot-plug
-path has NOT been exercised with this patch yet.
+Tested on 7.2.6 with the patch built as an out-of-tree libahci (the stock
+ahci module binds to it, symbol CRCs are unchanged). Hot-plugging a drive
+into a free port of the multiplier then logged "FBS is disabled",
+"softreset failed (device not ready)" and a PMP hardreset, followed by
+"re-enabling FBS after error handling" and "FBS is enabled". Afterwards
+two other drives behind the same multiplier read 259 + 259 MB/s in
+parallel (O_DIRECT, 4 MiB blocks), against 268 MB/s for one drive alone,
+so their commands overlap again.
 
 Fixes: 89dafa20f3da ("ahci: disabled FBS prior to issuing software reset")
 Assisted-by: LLM
