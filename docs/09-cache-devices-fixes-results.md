@@ -163,6 +163,9 @@ pool the emptied buffers were freed within six minutes of going idle, without th
 
 ### 4.3 `dmzadm --check/--repair` segfault on two-device sets (`patches/dmzadm-check-conv-zones.patch`)
 
+Sent to the maintainer and dm-devel on 2026-10-10:
+[[PATCH dm-zoned-tools] dmz: check: do not use the write pointer of conventional zones](https://lore.kernel.org/dm-devel/20261010110553.379-1-volvo.mail@gmail.com/).
+
 In `dmz_check_mapped_zone_bitmap()` the write-pointer test runs for every mapped zone that is not a "cache"
 zone, and with two devices `dmz_zone_is_cache()` only matches the cache device's zones. A chunk mapped to a
 **conventional zone of the zoned drive** (normal after reclaim) then uses the drive-reported write pointer

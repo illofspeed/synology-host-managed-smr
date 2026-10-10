@@ -167,8 +167,8 @@ Both caches make the pool depend on the cache device. Everything is in
   cached, NAS SSD-cache threshold at DSM's default: **155 MB/s, then 75–117 MB/s (5.1 h)**, drives writing
   each byte about once instead of almost three times.
 - Three bugs found and patched (dm-zoned reclaim, `dmzadm --check`, libahci FBS), plus a drill in which
-  `dmzadm --repair` destroyed a member's data — and how to recover instead. The dm-zoned fixes are
-  [on dm-devel](https://lore.kernel.org/dm-devel/20261010105122.398-1-volvo.mail@gmail.com/) since 2026-10-10.
+  `dmzadm --repair` destroyed a member's data — and how to recover instead. The dm-zoned and `dmzadm`
+  fixes were [sent upstream](patches/upstream/README.md#status) on 2026-10-10.
 - Everything is in [09 — Cache devices without a rebuild, fixes, results](docs/09-cache-devices-fixes-results.md).
 
 | Other measurements | Result |
