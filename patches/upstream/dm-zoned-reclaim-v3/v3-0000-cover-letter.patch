@@ -7,6 +7,8 @@ Changes in v3:
 - Patch 2: reworded the comment and dropped the redundant
   dmz_nr_cache_zones() test, so the condition fits on one line
   (Damien Le Moal). Patches 1 and 3 are unchanged.
+- Signed-off-by stays "illofspeed", my GitHub identity, as discussed on
+  v2. Thanks for checking.
 
 Changes in v2:
 - No code changes; only my author address changed.
