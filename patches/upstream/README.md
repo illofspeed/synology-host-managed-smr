@@ -11,7 +11,7 @@ The same fixes as the combined patches in `patches/`, split and formatted for th
 | Series | Sent | Where |
 |---|---|---|
 | `dm-zoned-reclaim/` (0/3 + 3) | 2026-10-10 to dm-devel, the device-mapper maintainers, Hannes Reinecke, Damien Le Moal, LKML | [lore](https://lore.kernel.org/dm-devel/?q=s%3A%22dm+zoned%3A+fix+two+idle+reclaim+problems%22), [patchwork](https://patchwork.kernel.org/series/1182929/) |
-| `dm-zoned-reclaim-v3/` | prepared 2026-10-11 after Damien Le Moal's review of v2 (patch 2: clearer comment, redundant test dropped); lab: reproducer 0 MB/s, pool checksums OK | send with `prepare-v3-dm-zoned.sh` once the Signed-off-by name question is settled |
+| `dm-zoned-reclaim-v3/` | **sent 2026-10-11** after Damien Le Moal's review of v2 (patch 2: clearer comment, redundant test dropped; author's full name); lab: reproducer 0 MB/s, pool checksums OK | [patchwork](https://patchwork.kernel.org/series/1183414/) |
 | `libahci-fbs/` | 2026-10-10 to linux-ide, Damien Le Moal, Niklas Cassel, LKML (after the hot-plug test passed the same day) | [lore](https://lore.kernel.org/linux-ide/?q=s%3A%22re-enable+FBS+after+error+handling%22) |
 | `dm-zoned-tools/` | 2026-10-10 to Damien Le Moal, dm-devel, Hannes Reinecke (by mail, as the project's README asks; prepared by `prepare-dmzadm-patch.sh`) | [lore](https://lore.kernel.org/dm-devel/?q=s%3A%22dmz%3A+check%3A+do+not+use+the+write+pointer%22) |
 
