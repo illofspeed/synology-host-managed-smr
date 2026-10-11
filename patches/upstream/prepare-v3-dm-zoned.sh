@@ -26,6 +26,12 @@ import sys
 ident, src, dst = sys.argv[1:]
 head, body = open(src).read().split("\n\n", 1)
 head = "\n".join(("From: " + ident) if l.startswith("From: ") else l for l in head.split("\n"))
+name = ident.split(" <")[0]
+body = body.replace("illofspeed (3):", name + " (3):")
+if name != "illofspeed":
+    body = body.replace(
+        '- Signed-off-by stays "illofspeed", my GitHub identity, as discussed on\n  v2. Thanks for checking.\n',
+        "- From and Signed-off-by now carry my full name instead of the GitHub\n  handle, as you preferred on v2. Thanks for checking.\n")
 open(dst, "w").write(head + "\n\n" + body)
 PY
 cd ..
