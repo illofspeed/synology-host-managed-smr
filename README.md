@@ -319,6 +319,18 @@ Placeholders such as `<GUEST_IP>`, `<GUEST_DOMAIN_UUID>`, `<SERIAL>` and
 `<XFS_UUID>` stand for values from your own system. PCI addresses shown in the
 docs are the author's and are specific to one machine: never copy them.
 
+## Search terms
+
+The exact names and messages this guide is about, for people searching for them: WD Ultrastar DC HC680 27 TB
+(`WUH722870ALE604` / `WSH722870ALE604`), host-managed SMR, HM-SMR, zoned block device, `CONFIG_BLK_DEV_ZONED`,
+Synology DS3622xs+, DX1222 expansion unit, DSM 7.4, Virtual Machine Manager (VMM), `virsh attach-device`,
+`vfio-pci`, Marvell 88SE9235 and 88SE1475 (`mv14xx`), 88SM9705 port multiplier, `Direct-Access-ZBC`
+(`/dev/sg` only, no `/dev/sd`), dm-zoned, `dmzadm --format` / `--check` / `--repair`, dm-zoned cache device,
+md RAID5 on zoned drives, LUKS2, XFS, OpenMediaVault 8, kernel 7.2.6 (`7.2.6-070206-generic`), Hyper Backup
+rsync target, `skip_seq_thresh_kb` (DSM SSD-cache sequential skip), `FBS is disabled`,
+`softreset failed (device not ready)`, zoned btrfs ENOSPC data loss, zonefs, tcmu-runner and `scsi_debug zbc=managed`
+emulation.
+
 ## License
 
 This repository is licensed under the GNU General Public License v3.0. See

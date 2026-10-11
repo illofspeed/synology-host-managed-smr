@@ -1,0 +1,31 @@
+# GitHub Pages (Jekyll) settings: renders the Markdown as a website with proper page titles,
+# a sitemap and working links between the documents. Enable under Settings -> Pages
+# (source: deploy from branch "main", folder "/ (root)").
+title: Host-managed SMR drives with a Synology NAS
+description: >-
+  Run WD Ultrastar DC HC680 host-managed SMR drives with a Synology DS3622xs+ and DX1222: pass the
+  expansion unit's SATA controller to a VMM guest and build dm-zoned, md RAID5, LUKS2 and XFS in
+  OpenMediaVault. As-built guide with scripts, benchmarks, kernel patches and risks.
+url: https://illofspeed.github.io
+baseurl: /synology-host-managed-smr
+remote_theme: pages-themes/primer@v0.6.0
+plugins:
+  - jekyll-remote-theme
+  - jekyll-relative-links
+  - jekyll-sitemap
+  - jekyll-seo-tag
+relative_links:
+  enabled: true
+  collections: false
+markdown: kramdown
+exclude:
+  - LICENSE
+  - "*.sh"
+  - "*.py"
+  - "*.patch"
+  - systemd/
+  - examples/
+  - monitoring/
+  - scripts/
+  - tools/
+  - repro/
