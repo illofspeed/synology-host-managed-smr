@@ -18,14 +18,3 @@ relative_links:
   enabled: true
   collections: false
 markdown: kramdown
-exclude:
-  - LICENSE
-  - "*.sh"
-  - "*.py"
-  - "*.patch"
-  - systemd/
-  - examples/
-  - monitoring/
-  - scripts/
-  - tools/
-  - repro/

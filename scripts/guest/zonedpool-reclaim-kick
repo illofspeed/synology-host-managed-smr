@@ -1,5 +1,6 @@
 #!/bin/sh
-# zonedpool-reclaim-kick — keep dm-zoned's idle buffer drain going (workaround, kernel 7.2.6).
+# zonedpool-reclaim-kick — keep dm-zoned's idle buffer drain going (workaround, kernel 7.2.6;
+# the cause is fixed by patches/dm-zoned-reclaim.patch, under review upstream).
 #
 # dm-zoned re-arms its reclaim worker's 10 s idle poll only on the "reclaim not needed" path
 # (drivers/md/dm-zoned-reclaim.c:514 in v7.2.6). After a reclaim pass that ends while the target is

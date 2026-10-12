@@ -545,6 +545,10 @@ Plugging or pulling any drive behind one of the DX1222's port multipliers freeze
 on that multiplier while libata recovers it: **12 s** for a pull and **25 s** for an insert in
 the test of 2026-09-28. The other drives lost no data and logged no errors, but every I/O to
 them waited. See [05, section 3.7](05-operations-monitoring-performance.md#37-replacing-a-drive-tested-2026-09-28).
+On kernels before 7.4 the same event can also leave FIS-based switching off on that port until
+the next boot, which halves parallel reads from the other drives in the group; the guide's libahci
+patch fixes it and was applied to the libata tree for Linux 7.4 as commit 21d333ab
+([09, 4.4](09-cache-devices-fixes-results.md#44-libahci-fis-based-switching-stays-off-after-a-hot-plug-patcheslibahci-fbs-reenablepatch)).
 
 ### 7.9 Cache devices make the pool depend on them
 

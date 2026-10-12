@@ -405,7 +405,7 @@ from `dmz_locate_metadata` using the **default** R = 16, not the SB's value
   2-device target, read the data, remove it cleanly. With `--repair` the same loop could clear
   bits based on heap garbage before it crashes, so never run it on a 2-device set.
 - `--relabel` (1340-1416) needs all sets valid. After conversion it can change the inherited
-  "dmz-<cache serial>" label.
+  `"dmz-<cache serial>"` label.
 
 ---
 

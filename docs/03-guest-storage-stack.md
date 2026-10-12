@@ -149,7 +149,10 @@ What is known:
   ([05-operations-monitoring-performance.md](05-operations-monitoring-performance.md)).
 - On 7.2.6, dm-zoned's idle buffer drain does not always restart after a busy period, so the
   write buffer can stay about two thirds full on an idle pool. Install the reclaim-kick timer
-  ([05, 1.2.1](05-operations-monitoring-performance.md#121-the-idle-drain-can-stall-kernel-726-install-the-reclaim-kick)).
+  ([05, 1.2.1](05-operations-monitoring-performance.md#121-the-idle-drain-can-stall-kernel-726-install-the-reclaim-kick))
+  or run the patched dm-zoned module
+  ([09, 4.2](09-cache-devices-fixes-results.md#42-dm-zoned-the-reclaim-worker-stops-polling-same-patch-hunk-3);
+  fix sent upstream, under review).
 - Debian enables `xfs_scrub_all.timer` by default. On kernels built with XFS online scrub
   (Debian's 7.1.8 and Zabbly's 7.2.7, for example), it runs a real full-media scan of the
   pool once a month. Ubuntu's 7.2.6 is built without online scrub, so there the timer does

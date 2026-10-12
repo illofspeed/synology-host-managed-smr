@@ -27,11 +27,13 @@ through tcmu-runner), then on the real pool.
 - With cache devices on the NAS, **leave DSM's SSD-cache threshold at its default (1024 KB)**. Caching
   the cache disks' streams on the NAS NVMe made bursts *slower* (the insert path tops out near
   170 MB/s) and floods the SSDs during every DSM Data Scrubbing.
-- Three bugs, all fixed with small patches (`patches/`): dm-zoned idle reclaim copying random zone →
+- Four bugs, all fixed with three small patches (`patches/`): dm-zoned idle reclaim copying random zone →
   random zone forever on a cache-device target, dm-zoned's reclaim worker not re-arming its idle poll
   (the reason for the reclaim kick in [05](05-operations-monitoring-performance.md)), `dmzadm --check`
   segfaulting on two-device sets, and libahci leaving FIS-based switching off after a hot-plug on a port
-  multiplier. As of October 2026 none of them had a public report or fix.
+  multiplier. None of them had a public report or fix before this work; all three patches were sent upstream on
+  2026-10-10. The libahci fix was applied to the libata tree for Linux 7.4 on 2026-10-12 (commit 21d333ab); the
+  dm-zoned series and the dmzadm fix are at v3 under review on dm-devel (section 4).
 - **Never run `dmzadm --repair` on a member whose check reports invalid chunk mappings**: in the lab it
   turned one damaged map block into the loss of every chunk on the member (section 5.1).
 
@@ -131,8 +133,13 @@ kept with the author's notes; the benchmark script records drive bytes, cache fi
 ## 4. Bugs found, and the patches
 
 The two dm-zoned fixes (4.1, 4.2) were sent upstream on 2026-10-10 as a three-patch series:
-[[PATCH 0/3] dm zoned: fix two idle reclaim problems](https://lore.kernel.org/dm-devel/?q=s%3A%22dm+zoned%3A+fix+two+idle+reclaim+problems%22) on dm-devel. The split series
-is in [`patches/upstream/`](../patches/upstream/).
+[[PATCH 0/3] dm zoned: fix two idle reclaim problems](https://lore.kernel.org/dm-devel/?q=s%3A%22dm+zoned%3A+fix+two+idle+reclaim+problems%22) on dm-devel. Now at v3
+(patch 2 reworded after Damien Le Moal's review of v2), under review since 2026-10-11
+([patchwork series 1183414](https://patchwork.kernel.org/series/1183414/)); current status in
+[patches/upstream/README.md](../patches/upstream/README.md#status). The split series
+is in [`patches/upstream/`](../patches/upstream/). The combined `patches/dm-zoned-reclaim.patch` is the v1 form (same
+behaviour; the module on the reference system was built from it), `patches/upstream/dm-zoned-reclaim-v3/` is the
+reviewed wording (patch 2 without the redundant `dmz_nr_cache_zones()` test).
 
 All three patches are against the versions the reference system runs (kernel 7.2.6 = upstream master for
 the changed functions in October 2026; dm-zoned-tools 2.2.2 = master). They were built out of tree in the lab
@@ -165,6 +172,8 @@ pool the emptied buffers were freed within six minutes of going idle, without th
 
 Sent to the maintainer and dm-devel on 2026-10-10:
 [[PATCH dm-zoned-tools] dmz: check: do not use the write pointer of conventional zones](https://lore.kernel.org/dm-devel/?q=s%3A%22dmz%3A+check%3A+do+not+use+the+write+pointer%22).
+v3 (no code changes) under review since 2026-10-11 ([patchwork series 1183416](https://patchwork.kernel.org/series/1183416/));
+status in [patches/upstream/README.md](../patches/upstream/README.md#status).
 
 In `dmz_check_mapped_zone_bitmap()` the write-pointer test runs for every mapped zone that is not a "cache"
 zone, and with two devices `dmz_zone_is_cache()` only matches the cache device's zones. A chunk mapped to a
@@ -187,9 +196,14 @@ still attached. Note that FBS was **not** the cause of the low write speed throu
 Tested on a real hot-plug on 2026-10-10: a drive inserted into a free bay of a multiplier group logged
 "FBS is disabled", "softreset failed (device not ready)" and the hard reset, then
 `re-enabling FBS after error handling` and "FBS is enabled". Two other drives in that group then read
-259 + 259 MB/s in parallel (one alone: 268 MB/s), so FBS was really back on.
+259 + 259 MB/s in parallel (one alone: 268 MB/s), so FBS was really back on. The
+`re-enabling FBS after error handling` line comes from the out-of-tree build in `patches/` (used for that test);
+the merged version has no extra log line, so on Linux 7.4+ look only for "FBS is enabled" after the hard reset.
+
 **Merged:** applied to the libata tree for Linux 7.4 on 2026-10-12 as commit
-[21d333ab](https://git.kernel.org/libata/linux/c/21d333ab) (v4, after review). Sent to linux-ide on 2026-10-10: [[PATCH] ata: libahci: re-enable FBS after error handling on a port
+[21d333ab](https://git.kernel.org/libata/linux/c/21d333ab) (v4, after review). The merged code differs from
+`patches/libahci-fbs-reenable.patch` only in that the `re-enabling FBS after error handling` line was dropped at
+the reviewer's request; the out-of-tree patch keeps it. Sent to linux-ide on 2026-10-10: [[PATCH] ata: libahci: re-enable FBS after error handling on a port
 multiplier](https://lore.kernel.org/linux-ide/?q=s%3A%22re-enable+FBS+after+error+handling%22).
 
 ### 4.5 Reproducers

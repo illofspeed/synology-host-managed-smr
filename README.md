@@ -197,7 +197,10 @@ Both caches make the pool depend on the cache device. Everything is in
    NAS. Once it needed a guest reboot; once it cleared by itself. No upstream
    report or fix exists. The mitigation is monitoring that tells a hang from
    busy reclaim, automatic evidence capture, and a reboot. Separately, 7.2.6's
-   idle buffer drain can stall; a 15-minute reclaim-kick timer works around it.
+   idle buffer drain can stall; the dm-zoned patch in `patches/` fixes it
+   ([09, 4.2](docs/09-cache-devices-fixes-results.md#42-dm-zoned-the-reclaim-worker-stops-polling-same-patch-hunk-3);
+   sent upstream, v3 under review) and a 15-minute reclaim-kick timer works
+   around it on a stock module.
 4. **It goes against published advice.** Western Digital's zoned storage
    documentation does not recommend dm-zoned, and nobody else was found
    running md RAID on top of it ([07](docs/07-prior-art.md)).
@@ -296,10 +299,11 @@ Read in this order:
 │   ├── dmz-metaset.py                     inspect / copy dm-zoned metadata sets (instead of dmzadm --repair)
 │   └── dmz-cache-layout-SPEC.md           on-disk layout and the source references behind the tools
 ├── repro/                                 reproducers on a RAM-backed scsi_debug zoned disk (09, 4.5)
-├── patches/                               kernel 7.2 / dm-zoned-tools 2.2.2 (09, section 4)
+├── patches/                               kernel 7.2 / dm-zoned-tools 2.2.2 out-of-tree copies (09, section 4)
 │   ├── dm-zoned-reclaim.patch             no random→random loop, reclaim worker keeps polling
 │   ├── dmzadm-check-conv-zones.patch      no segfault checking two-device sets
-│   └── libahci-fbs-reenable.patch         FBS back on after port-multiplier error handling
+│   ├── libahci-fbs-reenable.patch         FBS back on after port-multiplier error handling (merged in Linux 7.4 as 21d333ab; this copy keeps one extra info print)
+│   └── upstream/                          as sent to the lists (v1–v4), status table, prepare and reply scripts
 ├── systemd/                               the late boot chain in the guest, plus the kick timer
 │   ├── zonedpool-dmzassemble.service
 │   ├── zonedpool-mdassemble.service
@@ -323,7 +327,7 @@ docs are the author's and are specific to one machine: never copy them.
 ## Search terms
 
 The exact names and messages this guide is about, for people searching for them: WD Ultrastar DC HC680 27 TB
-(`WUH722870ALE604` / `WSH722870ALE604`), host-managed SMR, HM-SMR, zoned block device, `CONFIG_BLK_DEV_ZONED`,
+(`WSH722870ALE604`), host-managed SMR, HM-SMR, zoned block device, `CONFIG_BLK_DEV_ZONED`,
 Synology DS3622xs+, DX1222 expansion unit, DSM 7.4, Virtual Machine Manager (VMM), `virsh attach-device`,
 `vfio-pci`, Marvell 88SE9235 and 88SE1475 (`mv14xx`), 88SM9705 port multiplier, `Direct-Access-ZBC`
 (`/dev/sg` only, no `/dev/sd`), dm-zoned, `dmzadm --format` / `--check` / `--repair`, dm-zoned cache device,

@@ -124,8 +124,12 @@ systemctl enable --now zonedpool-reclaim-kick.timer
 On the reference pool the first kick started reclaim at once on all three drives (about
 35 MB/s read and 36 MB/s written per drive) and emptied the buffers in about 1.5 hours.
 Undo: `systemctl disable --now zonedpool-reclaim-kick.timer` and delete the three files. The
-upstream fix would be to re-arm the idle poll at the end of every pass; as of this writing it
-has not been reported upstream. Whether other kernel versions behave the same is untested.
+fix (re-arm the idle poll after every pass) is hunk 3 of
+[`patches/dm-zoned-reclaim.patch`](../patches/dm-zoned-reclaim.patch)
+([09, 4.2](09-cache-devices-fixes-results.md#42-dm-zoned-the-reclaim-worker-stops-polling-same-patch-hunk-3));
+it was sent upstream on 2026-10-10 as part of the dm-zoned series, v3 under review on dm-devel.
+The kick timer remains the workaround for a stock 7.2.x module. Whether other kernel versions
+behave the same is untested.
 
 ### 1.3 Measured throughput
 
@@ -205,7 +209,9 @@ following a power event on the NAS:
 2. After the NAS had been shut down by mistake and powered on again, one reclaim worker was
    in D again after a clean boot. About an hour later it had cleared by itself.
 
-There is no upstream bug report or fix for this. A later review of the kernel code suggested
+There is no upstream bug report or fix for this. The dm-zoned patches in
+[09, section 4](09-cache-devices-fixes-results.md#41-dm-zoned-idle-reclaim-loops-random--random-on-a-cache-device-target-patchesdm-zoned-reclaimpatch)
+address the idle random-to-random reclaim loop and the stalled poll, not this hang. A later review of the kernel code suggested
 a likely but unverified harmless mechanism: an idle reclaim loop that only sends TEST UNIT
 READY to the drive and moves no data. According to the same review, genuinely blocked threads
 would more likely wait in `dmz_reclaim_copy -> wait_on_bit_io`, a dm-zoned mutex,
@@ -788,7 +794,11 @@ wrong target is a **surviving member**.
    froze them for **25 s** (the new drive was slow to spin up). In both cases the other members
    logged 0 errors: their commands waited and then completed. The DX1222 has three bays per
    port multiplier, so plugging a drive into a bay next to the pool's members freezes the pool
-   for that long. If you run anything with short timeouts on the pool, stop it first. The
+   for that long. On kernels before 7.4 the same event can also leave FIS-based switching off on
+   that port until the next boot (`FBS is disabled` in the kernel log with no later `FBS is enabled`);
+   the libahci patch in [09, 4.4](09-cache-devices-fixes-results.md#44-libahci-fis-based-switching-stays-off-after-a-hot-plug-patcheslibahci-fbs-reenablepatch)
+   fixes it and was applied to the libata tree for Linux 7.4 as commit 21d333ab. If you run anything
+   with short timeouts on the pool, stop it first. The
    conservative route still exists: shut the guest down cleanly, swap the drive, start the
    guest; the watcher re-attaches the controller. Remember that starting a guest that carries
    the controller is the situation the NAS panic was correlated with

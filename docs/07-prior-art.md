@@ -534,8 +534,8 @@ above it.
 - **SNIA SDC: "High-performance SMR drives with dm-zoned Caching" (Hannes
   Reinecke)** — <https://www.snia.org/educational-library/high-performance-smr-drives-dm-zoned-caching-2020>,
   2020-09-23. Multi-device dm-zoned with a fast cache device to saturate SMR
-  drives. This repository uses only the drives' own conventional zones as the
-  buffer; a cache device was not tried.
+  drives. This repository ran that way until October 2026; since 2026-10-08 every
+  member has a cache device ([08](08-caching.md), [09](09-cache-devices-fixes-results.md)).
 - **Upstream status of dm-zoned, 2024–2026.** Recent changes are mostly
   cleanups. Related items:
   - "dm: Fix dm-zoned-reclaim zone write pointer alignment" (Damien Le Moal),
@@ -545,11 +545,24 @@ above it.
     <https://ratatoskr.run/linux-block/2026/05/9003225/t>, 2026-05-13.
   - A double free in `dmz_load_sb()` on the multi-device error path (reported
     by Dan Carpenter), <https://ratatoskr.run/dm-devel/2026/05/17064904/t>,
-    2026-05-30; no fix visible in mainline on 2026-09-26. This repository uses
-    one device per mapper and does not take that path.
+    2026-05-30; no fix visible in mainline on 2026-09-26. This repository now uses
+    two-device mappers (cache device + drive), so the multi-device load path
+    applies; the bug is on its error path and has not been hit here. The reclaim
+    series cover letter lists it as related but not addressed.
   - A 2018 lockdep fix for a reclaim deadlock class with XFS on top (Bart Van
     Assche), <https://dm-devel.redhat.narkive.com/Vr08IKsb/patch-v2-dm-zoned-avoid-triggering-reclaim-from-inside-dmz-map>,
     2018-06-22. Historical; not linked to the incidents here.
+  - Fixes from this repository, sent upstream in October 2026 (status table:
+    [patches/upstream/README.md](../patches/upstream/README.md#status)):
+    - "dm zoned: fix two idle reclaim problems" (3 patches, dm-devel; first sent
+      2026-10-10, v3 of 2026-10-11 under review),
+      <https://patchwork.kernel.org/series/1183414/>.
+    - "dmz: check: do not use the write pointer of conventional zones"
+      (dm-zoned-tools; v3 under review), <https://patchwork.kernel.org/series/1183416/>.
+    - Related, not dm-zoned: "ata: libahci: re-enable FBS after error handling on a
+      port multiplier" - applied to libata `for-7.4` on 2026-10-12 as commit
+      <https://git.kernel.org/libata/linux/c/21d333ab>; needed by this stack on
+      the 88SE9235 port multipliers, see [09](09-cache-devices-fixes-results.md).
 
   **No public report or fix was found for a dm-zoned reclaim worker stuck in D
   state**, which is what the author saw twice on 7.2.6.
@@ -703,8 +716,11 @@ of this page:
 
 What this repository does **not** add:
 
-- Any new kernel code or storage layer. dm-zoned, md, LUKS2 and XFS are
-  standard upstream components.
+- Any new storage layer. dm-zoned, md, LUKS2 and XFS are standard upstream
+  components; the repository adds only three small fixes
+  ([09, section 4](09-cache-devices-fixes-results.md#4-bugs-found-and-the-patches)):
+  two kernel patches (libahci, merged into the libata tree for Linux 7.4;
+  dm-zoned, under review) and one dmzadm fix (under review).
 - Evidence that the design is safe in general. It goes against the published
   advice in [section 3](#3-published-advice-against-this-design), it has run
   for days on one system, and one NAS kernel panic remains unexplained
@@ -712,7 +728,7 @@ What this repository does **not** add:
 - Evidence for any hardware other than a DS3622xs+ with a DX1222 and three
   HC680s.
 
-<details>
+<details markdown="1">
 <summary>Searches run on 2026-09-26</summary>
 
 Three research passes ran independently. Queries are listed as they were run.
@@ -928,7 +944,10 @@ forums and blogs) found **no public counterpart** for: attaching or detaching a 
 without a rebuild, the `dmzadm --check` segfault on two-device sets, the dm-zoned reclaim loop and stalled
 idle polling, `dmzadm --repair` destroying a member with a corrupt primary map, FIS-based switching staying
 off after a port-multiplier hot-plug, and **any published numbers for dm-zoned under md RAID**. dm-zoned's
-kernel code had no commits after 2026-07-15 and dm-zoned-tools none since 2024-05-30.
+kernel code had no commits after 2026-07-15 and dm-zoned-tools none since 2024-05-30. Three of those gaps now
+have public fixes from this guide (chapter 9, `patches/upstream/README.md`): the libahci FIS-based-switching fix
+was applied to the libata tree for Linux 7.4 on 2026-10-12 (commit 21d333ab); the dm-zoned reclaim series (v3)
+and the `dmzadm --check` fix are under review on dm-devel.
 
 Known in part: the write-twice mechanism of dm-zoned (Reinecke, SDC 2020), md RAID5's 4 KiB discard
 granularity (linux-raid, 2019), DSM's `skip_seq_thresh_kb` (007revad's Synology_enable_sequential_IO), the

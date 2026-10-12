@@ -1,3 +1,9 @@
+Out-of-tree variant for kernel 7.2.6 of the fix merged into Linux 7.4 as commit
+21d333ab (patches/upstream/libahci-fbs-v4/). Identical except for one extra log
+line, "ahci ... re-enabling FBS after error handling", kept here because it is
+what the hot-plug test in docs/09 section 4.4 logged; the merged code only logs
+"FBS is enabled". Not needed on 7.4+.
+
 --- a/drivers/ata/libahci.c
 +++ b/drivers/ata/libahci.c
 @@ -2220,6 +2220,23 @@
