@@ -168,7 +168,8 @@ Both caches make the pool depend on the cache device. Everything is in
   each byte about once instead of almost three times.
 - Three bugs found and patched (dm-zoned reclaim, `dmzadm --check`, libahci FBS), plus a drill in which
   `dmzadm --repair` destroyed a member's data — and how to recover instead. All three fixes were
-  [sent upstream](patches/upstream/README.md#status) on 2026-10-10.
+  [sent upstream](patches/upstream/README.md#status) on 2026-10-10; the libahci fix was merged into the libata
+  tree for Linux 7.4 on 2026-10-12.
 - Everything is in [09 — Cache devices without a rebuild, fixes, results](docs/09-cache-devices-fixes-results.md).
 
 | Other measurements | Result |

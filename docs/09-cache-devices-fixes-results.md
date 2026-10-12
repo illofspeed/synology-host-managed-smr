@@ -188,7 +188,8 @@ Tested on a real hot-plug on 2026-10-10: a drive inserted into a free bay of a m
 "FBS is disabled", "softreset failed (device not ready)" and the hard reset, then
 `re-enabling FBS after error handling` and "FBS is enabled". Two other drives in that group then read
 259 + 259 MB/s in parallel (one alone: 268 MB/s), so FBS was really back on.
-Sent to linux-ide the same day: [[PATCH] ata: libahci: re-enable FBS after error handling on a port
+**Merged:** applied to the libata tree for Linux 7.4 on 2026-10-12 as commit
+[21d333ab](https://git.kernel.org/libata/linux/c/21d333ab) (v4, after review). Sent to linux-ide on 2026-10-10: [[PATCH] ata: libahci: re-enable FBS after error handling on a port
 multiplier](https://lore.kernel.org/linux-ide/?q=s%3A%22re-enable+FBS+after+error+handling%22).
 
 ### 4.5 Reproducers
