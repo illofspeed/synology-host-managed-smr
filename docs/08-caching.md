@@ -216,17 +216,29 @@ blank and unused, LUKS is open on the raw array, and no clients are connected.
 
 ### 4.3 Removing it
 
-Without data loss: switch the policy to `cleaner`, wait until the dirty count
-reaches 0, then take the pool offline and remove the layer:
+Without data loss, in this order: stop everything that writes to the pool, take the pool offline, **then** flush
+the cache, then remove the layer.
 
 ```sh
+# 1. offline first: stop NFS/SMB and other writers, then
+umount /srv/hc680
+cryptsetup close hc680crypt
+# 2. nothing writes any more: flush every dirty block to the array
 dmsetup reload hc680cache --table "$(dmsetup table hc680cache | sed 's/ smq 0$/ cleaner 0/')"
 dmsetup resume hc680cache
 dmsetup status hc680cache          # field 14 = dirty blocks; wait for 0
+# 3. remove the layer
+dmsetup remove hc680cache
 ```
 
-Then stop NFS, unmount, close LUKS, `dmsetup remove hc680cache`, remove the
-drop-in and restore `crypttab`. This rollback is **untested**.
+Then remove the drop-in and restore `crypttab` so LUKS opens on `/dev/md/hc680` directly.
+
+> **Why this order:** unmounting writes the XFS log and superblock, and in writeback mode those writes land
+> *dirty* in the cache. dm-cache does not write dirty blocks back when the device is suspended or removed.
+> Flushing first and unmounting afterwards (the order this section used to give) therefore loses the
+> unmount's writes: the array then needs XFS log recovery. Found and verified in a QEMU rehearsal on
+> 2026-10-13 (dm-zoned on zoned null_blk → md RAID5 → dm-cache writeback → LUKS2 → XFS): with this order a
+> read-only mount of LUKS-on-md afterwards succeeds and the data checksums match.
 
 ## 5. Synology: make the SSD cache take the cache disks' I/O
 
