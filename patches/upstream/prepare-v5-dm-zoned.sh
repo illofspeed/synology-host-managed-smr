@@ -30,7 +30,9 @@ import sys
 ident, src, dst = sys.argv[1:]
 head, body = open(src).read().split("\n\n", 1)
 head = "\n".join(("From: " + ident) if l.startswith("From: ") else l for l in head.split("\n"))
-body = body.replace("illofspeed (4):", ident.split(" <")[0] + " (3):")
+if not head.startswith("From "):   # mbox separator line, as in git format-patch output
+    head = "From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\n" + head
+body = body.replace("illofspeed (4):", ident.split(" <")[0] + " (4):")
 open(dst, "w").write(head + "\n\n" + body)
 PY
 cd ..
@@ -40,6 +42,7 @@ grep -h -E "^(From|Signed-off-by): " out-v5-dm-zoned/*.patch | sort | uniq -c
 if grep -h -E "^(From|Signed-off-by): " out-v5-dm-zoned/*.patch | grep -v -F "<$MAIL>" >/dev/null; then
   echo "!!! some From/Signed-off-by lines do not use $MAIL - do not send"; exit 1; fi
 grep -h "^Subject:" out-v5-dm-zoned/*.patch
+grep -q -F "$NAME (4):" out-v5-dm-zoned/v5-0000-cover-letter.patch || { echo "!!! cover letter shortlog not rewritten - do not send"; exit 1; }
 if [ "${1:-}" = send ]; then
   git send-email --to=dm-devel@lists.linux.dev \
     --cc=mpatocka@redhat.com --cc=snitzer@kernel.org --cc=agk@redhat.com --cc=bmarzins@redhat.com \
