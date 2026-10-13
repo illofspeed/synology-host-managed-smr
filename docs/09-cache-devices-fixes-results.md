@@ -136,7 +136,8 @@ kept with the author's notes; the benchmark script records drive bytes, cache fi
 
 The two dm-zoned fixes (4.1, 4.2) were sent upstream on 2026-10-10 as a three-patch series:
 [[PATCH 0/3] dm zoned: fix two idle reclaim problems](https://lore.kernel.org/dm-devel/?q=s%3A%22dm+zoned%3A+fix+two+idle+reclaim+problems%22) on dm-devel. Now at v3
-(patch 2 reworded after Damien Le Moal's review of v2), under review since 2026-10-11
+(patch 2 reworded after Damien Le Moal's review of v2), sent 2026-10-11 and marked accepted in patchwork by
+2026-10-13 (Hannes Reinecke added a Reviewed-by for patch 1)
 ([patchwork series 1183414](https://patchwork.kernel.org/series/1183414/)); current status in
 [patches/upstream/README.md](../patches/upstream/README.md#status). The split series
 is in [`patches/upstream/`](../patches/upstream/). The combined `patches/dm-zoned-reclaim.patch` is the v1 form (same

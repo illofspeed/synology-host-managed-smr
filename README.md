@@ -182,7 +182,8 @@ below were an experiment.
 - Three bugs found and patched (dm-zoned reclaim, `dmzadm --check`, libahci FBS), plus a drill in which
   `dmzadm --repair` destroyed a member's data — and how to recover instead. All three fixes were
   [sent upstream](patches/upstream/README.md#status) on 2026-10-10; the libahci fix was merged into the libata
-  tree for Linux 7.4 on 2026-10-12.
+  tree for Linux 7.4 on 2026-10-12, and the dm-zoned series was accepted by the device-mapper maintainers
+  (patchwork, 2026-10-13).
 - Everything is in [09 — Cache devices without a rebuild, fixes, results](docs/09-cache-devices-fixes-results.md).
 
 | Other measurements | Result |
@@ -212,7 +213,7 @@ below were an experiment.
    busy reclaim, automatic evidence capture, and a reboot. Separately, 7.2.6's
    idle buffer drain can stall; the dm-zoned patch in `patches/` fixes it
    ([09, 4.2](docs/09-cache-devices-fixes-results.md#42-dm-zoned-the-reclaim-worker-stops-polling-same-patch-hunk-3);
-   sent upstream, v3 under review) and a 15-minute reclaim-kick timer works
+   fix accepted upstream, not yet in a release) and a 15-minute reclaim-kick timer works
    around it on a stock module.
 4. **It goes against published advice.** Western Digital's zoned storage
    documentation does not recommend dm-zoned, and nobody else was found
