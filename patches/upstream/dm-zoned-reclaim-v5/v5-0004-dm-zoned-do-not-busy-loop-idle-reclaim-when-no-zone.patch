@@ -12,18 +12,21 @@ reclaim work running without pause:
     the total number of random (and cache) zones is non-zero, whether or
     not any of them holds data;
   - dmz_do_reclaim() then finds no candidate and returns -EBUSY;
-  - dmz_reclaim_work() runs dmz_check_dev(), which issues a TEST UNIT
-    READY to every device, and dmz_schedule_reclaim() requeues the work
-    with no delay because dmz_should_reclaim() is still true.
+  - dmz_reclaim_work() runs dmz_check_dev(), which checks every device
+    for media events (a TEST UNIT READY on SCSI disks), and
+    dmz_schedule_reclaim() requeues the work with no delay because
+    dmz_should_reclaim() is still true.
 
-Without the previous patch the loop stops when a reclaim pass ends while
-the target is busy; with it the worker keeps polling, so the loop runs
-whenever the target is idle. On three 27 TB host-managed drives used
+Without the previous patch, a pass ending while the target is busy and
+has enough free zones can leave reclaim unqueued, which ends the loop;
+keeping the idle poll armed makes it recur whenever the target becomes
+idle. On three 27 TB host-managed drives used
 without cache devices (all random zones free) it kept about three CPUs
 busy and sent about 155,000 TEST UNIT READY commands per second to each
 drive while the target was idle.
 
-Only reclaim on idle when a random or cache zone actually holds data, and
+Only reclaim on idle when a random or cache zone actually holds data (the
+intent of the "p_unmap < 100" test that commit replaced), and
 handle -EBUSY like -ENOSPC: nothing can progress and no I/O failed, so
 poll again after the idle period instead of rescheduling at once, and
 skip the device check. Use queue_delayed_work() for that poll so work an

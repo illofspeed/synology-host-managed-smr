@@ -14,10 +14,11 @@ target whose random (and cache) zones are all free never stops running
 its reclaim work: since 90a9b8693f1b ("dm zoned: reclaim random zones
 when idle"), dmz_should_reclaim() treats "idle" plus a non-zero total
 number of random zones as "reclaim now", dmz_do_reclaim() finds no
-candidate and returns -EBUSY, dmz_check_dev() sends a TEST UNIT READY to
-every device, and the work is requeued with no delay. In mainline the
-loop stops when a pass ends while the target is busy; with patch 3 the
-worker keeps polling, so the loop runs whenever the target is idle.
+candidate and returns -EBUSY, dmz_check_dev() checks every device for
+media events (a TEST UNIT READY on SCSI disks), and the work is requeued
+with no delay. In mainline the loop can end when a pass finishes while
+the target is busy with enough free zones; with patch 3 the idle poll
+stays armed, so the loop recurs whenever the target becomes idle.
 
 Measured on 7.3-rc7 with three emulated host-managed members of an md
 RAID5 (idle, 30 s average):
