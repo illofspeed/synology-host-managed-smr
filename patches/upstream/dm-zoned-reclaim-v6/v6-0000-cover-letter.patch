@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: illofspeed <22580385+illofspeed@users.noreply.github.com>
+Subject: [PATCH v6 0/3] dm zoned: fix idle reclaim problems
+
+Mikulas,
+
+v4 of this series is already in dm-7.4 (acce1b6ac, 60427628f,
+ac82aa060); I missed that when I sent v5, sorry for the noise. v6 folds
+the new patch 4 of v5 into patch 1, as Damien asked. Patches 2 and 3
+have the same code as in dm-7.4. If you would rather keep dm-7.4 as it
+is, the difference can go on top of it as a single patch; I can send
+that, with the commit message of patch 1 here, instead. Please tell me
+which you prefer.
+
+What is new compared with v4 (now in patch 1): an idle target whose
+random (and cache) zones are all free never stops running its reclaim
+work. Since 90a9b8693f1b ("dm zoned: reclaim random zones when idle"),
+dmz_should_reclaim() treats "idle" plus a non-zero total number of
+random zones as "reclaim now", dmz_do_reclaim() finds no candidate and
+returns -EBUSY, dmz_check_dev() checks every device for media events (a
+TEST UNIT READY on SCSI disks), and the work is requeued with no delay.
+In mainline the loop can end when a pass finishes while the target is
+busy with enough free zones; with patch 3 the idle poll stays armed, so
+the loop recurs whenever the target becomes idle.
+
+Measured on 7.3-rc7 with three emulated host-managed members of an md
+RAID5, the target idle, SCSI commands to the members over 30 s:
+
+  stock dm-zoned   5,804,292 commands (193,476/s)   30 % kernel CPU
+  v6                      18 commands                0 % kernel CPU
+
+v4 (in dm-7.4) behaves like stock here: 187,707 commands/s and 31 %
+kernel CPU in an earlier run. With v6 the random zones filled by a
+2 GiB write burst were free again 90 seconds after the target became
+idle. On three 27 TB host-managed SATA drives (7.2.10 with an earlier
+version of the series) the loop kept about three CPUs busy with about
+155,000 TEST UNIT READY commands per second issued to each drive's SCSI
+device; libata completes those without sending anything to the drive,
+so the cost was CPU time. With the fix, under one command per second
+per drive.
+
+Changes since v5:
+ - patch 4 folded into patch 1 (Damien), which is now titled "dm zoned:
+   back off when reclaim cannot make progress"; its Reviewed-by tags
+   are dropped because the patch changed
+ - patch 1: the comment and the commit message no longer say that no
+   I/O failed (-ENOSPC can also come from a failed metadata write)
+ - patch 3: commit message mentions -EBUSY next to -ENOSPC (no code
+   change)
+ - commit message: TEST UNIT READY on SATA drives is completed by
+   libata, the cost of the loop was CPU time
+
+illofspeed (3):
+  dm zoned: back off when reclaim cannot make progress
+  dm zoned: do not reclaim a random zone into another random zone
+  dm zoned: keep polling for idle reclaim after a reclaim pass
+
+ drivers/md/dm-zoned-reclaim.c | 31 ++++++++++++++++++++++++++-----
+ 1 file changed, 26 insertions(+), 5 deletions(-)
+
+-- 
+2.47.3

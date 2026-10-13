@@ -1,0 +1,59 @@
+From 66205eafdb9bb8ff6b586eb0ab0eb1d454480920 Mon Sep 17 00:00:00 2001
+From: illofspeed <22580385+illofspeed@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 10:33:51 +0000
+Subject: [PATCH v6 3/3] dm zoned: keep polling for idle reclaim after a
+ reclaim pass
+
+dmz_reclaim_work() re-arms its DMZ_IDLE_PERIOD poll only when
+dmz_should_reclaim() returns false at the start of a pass (and, with the
+first patch of this series, when a pass fails with -ENOSPC or -EBUSY).
+After a pass it calls dmz_schedule_reclaim(), which queues the work only
+if reclaim is needed right now. When a pass ends while the target is
+still busy and has enough free zones, nothing is queued at all. Once the
+target goes idle, nothing re-evaluates dmz_should_reclaim() until
+another zone allocation, a "reclaim" message or a resume schedules the
+work, so the random or cache zones that filled up under load stay full.
+
+Seen on md RAID5 members on 27 TB host-managed drives: after heavy
+writes the random zones stayed full for hours on idle targets; the
+workaround was a timer sending "dmsetup message <dev> 0 reclaim". With
+this patch the emptied and filled zones were reclaimed within minutes of
+the targets going idle, without the timer.
+
+When reclaim is not needed right now, make dmz_schedule_reclaim() queue
+the idle poll, so the work stays queued after every pass. It uses
+queue_delayed_work(), which leaves already pending work alone, so the
+other callers (zone allocation and the "reclaim" message) neither
+postpone a pending poll nor delay a pending immediate reclaim.
+
+Fixes: 3b1a94c88b79 ("dm zoned: drive-managed zoned block device target")
+Reviewed-by: Damien Le Moal <dlemoal@kernel.org>
+Assisted-by: LLM
+---
+ drivers/md/dm-zoned-reclaim.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/md/dm-zoned-reclaim.c b/drivers/md/dm-zoned-reclaim.c
+index 841416f..e9db4f6 100644
+--- a/drivers/md/dm-zoned-reclaim.c
++++ b/drivers/md/dm-zoned-reclaim.c
+@@ -645,7 +645,8 @@ void dmz_reclaim_bio_acc(struct dmz_reclaim *zrc)
+ }
+ 
+ /*
+- * Start reclaim if necessary.
++ * Start reclaim if necessary. Otherwise make sure that an idle poll stays
++ * queued, without delaying work that is already pending.
+  */
+ void dmz_schedule_reclaim(struct dmz_reclaim *zrc)
+ {
+@@ -653,4 +654,6 @@ void dmz_schedule_reclaim(struct dmz_reclaim *zrc)
+ 
+ 	if (dmz_should_reclaim(zrc, p_unmap))
+ 		mod_delayed_work(zrc->wq, &zrc->work, 0);
++	else
++		queue_delayed_work(zrc->wq, &zrc->work, DMZ_IDLE_PERIOD);
+ }
+-- 
+2.47.3
+
