@@ -1,0 +1,81 @@
+From 0544b40350b58864a8f120b01d8f4bc5d00ecb23 Mon Sep 17 00:00:00 2001
+From: illofspeed <22580385+illofspeed@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 11:34:17 +0000
+Subject: [PATCH v4 0/3] dm zoned: fix two idle reclaim problems
+
+Changes in v4:
+- Patch 1: added the Fixes tag (Damien Le Moal), and the Reviewed-by tags
+  from Hannes Reinecke (given on v1; the code is unchanged since) and
+  Damien Le Moal.
+- Patch 2: added Damien Le Moal's Reviewed-by.
+- Patch 3: re-arm the idle poll in dmz_schedule_reclaim() instead of
+  open-coding it at the end of dmz_reclaim_work(), as Damien suggested.
+  The new branch uses queue_delayed_work(), so zone allocations and
+  "reclaim" messages leave an already pending poll or immediate reclaim
+  alone.
+- Rebased on v7.3-rc7 and tested there (see below).
+
+Mikulas: patchwork shows v3 as accepted. If v3 is already in your tree, I
+can send the patch 3 change and the Fixes tag as follow-up patches
+instead; please tell me which you prefer.
+
+Changes in v3:
+- Patch 2: reworded the comment and dropped the redundant
+  dmz_nr_cache_zones() test (Damien Le Moal).
+
+Changes in v2:
+- No code changes; only my author address changed.
+
+These patches fix two problems in dm-zoned's reclaim worker, found while
+running md RAID5 on three dm-zoned targets on 27 TB host-managed SMR drives
+(WD Ultrastar DC HC680), each target with a regular cache device.
+
+1. On a target with cache zones and no free sequential zone, an idle
+   target keeps copying random zones into other random zones, forever
+   (patch 2; patch 1 makes the resulting -ENOSPC back off instead of
+   spinning). After a full md rebuild every chunk is mapped, so this
+   happens right after a rebuild: the idle member read and wrote about
+   72 MB/s nonstop for hours.
+
+2. After a reclaim pass that ends while the target is busy, the idle poll
+   is never re-armed, so zones filled under load are not reclaimed when the
+   target goes idle (patch 3). Users notice it as "the buffer never drains";
+   the workaround has been a timer sending "dmsetup message <dev> 0 reclaim".
+
+Testing on v7.3-rc7 (kernel built from the tag, in a VM):
+- reproducer with no special hardware (scsi_debug zbc=managed, 64 MiB
+  zones, plus a 1 GiB loop cache device), idle target with no free
+  sequential zone, 120 s: stock module 500-660 MB/s of read and the same
+  of write in two runs, zone counters unchanged; with this series 0 MB/s:
+  https://github.com/illofspeed/synology-host-managed-smr/tree/main/repro
+- a small md RAID5 of three dm-zoned targets on emulated host-managed
+  drives (tcmu-runner ZBC handler), LUKS and XFS on top: module swapped in
+  and out with the files' checksums verified each time; after a 2 GiB
+  write burst the filled random zones of all three targets were reclaimed
+  within two minutes of going idle, with no "reclaim" message.
+Earlier versions of the series have run on 7.2.6 on the three real drives
+since 2026-10-05; the v4 form of patch 3 has not run there yet.
+
+Related, not addressed here: the double-free in dmz_load_sb() reported on
+dm-devel on 2026-05-30. Also not addressed: a "reclaim" message sent to a
+suspended target can already queue reclaim today when reclaim is needed;
+with patch 3 it can also queue the idle poll. If you would rather avoid
+that, I can keep the re-arm at the end of dmz_reclaim_work() instead (as
+in v3, with queue_delayed_work()), or send a separate patch that makes the
+message do nothing on a suspended target.
+
+The problems were found and the patches written with the help of an AI
+coding assistant (hence Assisted-by); the analysis, the tests and this
+description were reviewed by me.
+
+illofspeed (3):
+  dm zoned: back off when reclaim finds no destination zone
+  dm zoned: do not reclaim a random zone into another random zone
+  dm zoned: keep polling for idle reclaim after a reclaim pass
+
+ drivers/md/dm-zoned-reclaim.c | 21 +++++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
+
+-- 
+2.47.3
+
