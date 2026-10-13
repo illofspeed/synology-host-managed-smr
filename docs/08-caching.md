@@ -17,6 +17,16 @@ explains why that fails). Every number comes from the author's logs of
 > pool is then no longer an independent copy of the NAS's data. Keep a backup
 > that does not live on either.
 
+> [!TIP]
+> **Recommended setup.** Run the dm-zoned members plain. Give a member a cache device only while it
+> is being rebuilt: format the replacement drive with one (section 3.3) and detach it when the rebuild
+> is done ([09, 2](09-cache-devices-fixes-results.md#2-attaching-and-detaching-a-cache-device-without-a-rebuild)).
+> The 2–3-day rebuild in section 3 was measured with DSM's SSD-cache threshold at 0 (section 5).
+> A volume cache on top of the RAID (section 4) is fine to keep; in write-back mode, put it on a device
+> that is itself redundant. Keeping a cache device on every member permanently was an experiment
+> ([09](09-cache-devices-fixes-results.md)): it makes each member depend on its cache device and needs
+> the patched dm-zoned module.
+
 ## Contents
 
 1. [The bottleneck: every write goes through the drive's own buffer](#1-the-bottleneck-every-write-goes-through-the-drives-own-buffer)

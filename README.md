@@ -159,7 +159,20 @@ reads ran, put back into another bay, re-formatted and rebuilt
 Both caches make the pool depend on the cache device. Everything is in
 [08 — Caching](docs/08-caching.md).
 
-**Cache devices without a rebuild, and all members cached (October 2026).**
+**Recommended setup (October 2026).** Do not keep dm-zoned cache devices on the members permanently:
+a member's cache device holds its mapping metadata, so it stays a dependency of the pool for as long as it
+is attached, and the cached layout needs the patched dm-zoned module
+([09, 4.1](docs/09-cache-devices-fixes-results.md#41-dm-zoned-idle-reclaim-loops-random--random-on-a-cache-device-target-patchesdm-zoned-reclaimpatch)).
+Run the members plain and give a member a cache device only while it is being rebuilt: format the replacement
+drive with one ([08, 3.3](docs/08-caching.md#33-how-to-set-it-up)) and detach it once the rebuild is done
+([09, 2](docs/09-cache-devices-fixes-results.md#2-attaching-and-detaching-a-cache-device-without-a-rebuild)).
+In September that cut a rebuild from ~10 days to 2–3, with DSM's SSD-cache sequential threshold at 0; a rebuild
+at the default threshold is untested.
+A dm-cache volume cache on top of the plain RAID is fine to keep. In write-back mode it holds data that has
+not reached the drives yet, so put it on a device that is itself redundant. The all-members-cached runs
+below were an experiment.
+
+**Cache devices without a rebuild, and an all-members-cached experiment (October 2026).**
 - New tools attach or detach a member's dm-zoned cache device in **~3 minutes**, without reformatting
   and without a rebuild; md takes the member back with a **5-second** bitmap resync. Eight conversions
   on the real 27 TB members.
@@ -228,6 +241,8 @@ Both caches make the pool depend on the cache device. Everything is in
 10. **Optional cache layers tie the pool to the cache device.** With cache devices on the
     NAS's own volume, losing that volume loses the pool too
     ([01, 7.9](docs/01-requirements-and-risks.md#79-cache-devices-make-the-pool-depend-on-them)).
+    The recommended setup keeps only a volume cache permanently and gives a member a cache device
+    only while it is being rebuilt (see [Measured results](#measured-results)).
 11. **The published scripts are adapted, not the exact as-built files.** The
    NAS watcher, its boot hook and the metrics script were made configurable
    and gained extra checks. The watcher and hook were exercised against a

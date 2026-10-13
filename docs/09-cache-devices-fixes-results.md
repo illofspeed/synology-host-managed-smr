@@ -124,7 +124,9 @@ Reading it:
   3–6× faster** (73–178 MB/s instead of 26–30 MB/s, [08, section 3](08-caching.md)). It costs one NAS
   virtual disk per member, the patched dm-zoned module (rebuild it for every kernel update), and makes
   the pool depend on NAS volume 1.
-- The author keeps all three members cached, with the NAS threshold at its default.
+- Keeping all three members cached was an experiment and is not the recommended setup. Recommended
+  (October 2026): run the members plain, format a replacement drive with a cache device for its rebuild
+  ([08, 3.3](08-caching.md#33-how-to-set-it-up)) and detach it afterwards (section 2); a volume cache on top of the RAID can stay ([08](08-caching.md)).
 
 Raw logs, per-30-s samples and the NAS-side numbers (from a recorder on the NAS) for all three runs are
 kept with the author's notes; the benchmark script records drive bytes, cache fill and zone state every
