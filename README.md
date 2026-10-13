@@ -167,7 +167,9 @@ Run the members plain and give a member a cache device only while it is being re
 drive with one ([08, 3.3](docs/08-caching.md#33-how-to-set-it-up)) and detach it once the rebuild is done
 ([09, 2](docs/09-cache-devices-fixes-results.md#2-attaching-and-detaching-a-cache-device-without-a-rebuild)).
 In September that cut a rebuild from ~10 days to 2–3, with DSM's SSD-cache sequential threshold at 0; a rebuild
-at the default threshold is untested.
+at the default threshold is untested. A member being rebuilt adds no redundancy until it is in sync, so losing its
+cache device during the rebuild only means starting that rebuild again; the detach afterwards keeps md degraded for
+a few minutes.
 A dm-cache volume cache on top of the plain RAID is fine to keep. In write-back mode it holds data that has
 not reached the drives yet, so put it on a device that is itself redundant. The all-members-cached runs
 below were an experiment.

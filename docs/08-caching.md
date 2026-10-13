@@ -22,6 +22,9 @@ explains why that fails). Every number comes from the author's logs of
 > is being rebuilt: format the replacement drive with one (section 3.3) and detach it when the rebuild
 > is done ([09, 2](09-cache-devices-fixes-results.md#2-attaching-and-detaching-a-cache-device-without-a-rebuild)).
 > The 2–3-day rebuild in section 3 was measured with DSM's SSD-cache threshold at 0 (section 5).
+> A member being rebuilt adds no redundancy until it is in sync, so losing its cache device during
+> the rebuild only means starting that rebuild again; the detach afterwards keeps md degraded for a
+> few minutes.
 > A volume cache on top of the RAID (section 4) is fine to keep; in write-back mode, put it on a device
 > that is itself redundant. Keeping a cache device on every member permanently was an experiment
 > ([09](09-cache-devices-fixes-results.md)): it makes each member depend on its cache device and needs
