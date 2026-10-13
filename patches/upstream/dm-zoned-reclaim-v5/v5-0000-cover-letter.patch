@@ -1,0 +1,46 @@
+From: illofspeed <22580385+illofspeed@users.noreply.github.com>
+Subject: [PATCH v5 0/4] dm zoned: fix idle reclaim problems
+
+Mikulas,
+
+I noticed too late that v3 of this series is already in dm-7.4 and
+for-next (24646f6ed3, 2cca719c63, 5829edd027), so v4 crossed with it.
+This v5 is v4 plus one more fix; if you prefer to keep v3, I can send
+the v4 changes and patch 4 as incremental patches on top of dm-7.4
+instead - please tell me which you want.
+
+Patch 4 is new. While measuring an idle pool I found that an idle
+target whose random (and cache) zones are all free never stops running
+its reclaim work: since 90a9b8693f1b ("dm zoned: reclaim random zones
+when idle"), dmz_should_reclaim() treats "idle" plus a non-zero total
+number of random zones as "reclaim now", dmz_do_reclaim() finds no
+candidate and returns -EBUSY, dmz_check_dev() sends a TEST UNIT READY to
+every device, and the work is requeued with no delay. In mainline the
+loop stops when a pass ends while the target is busy; with patch 3 the
+worker keeps polling, so the loop runs whenever the target is idle.
+
+Measured on 7.3-rc7 with three emulated host-managed members of an md
+RAID5 (idle, 30 s average):
+
+  stock dm-zoned        181,195 SCSI commands/s   32 % kernel CPU
+  v4 (patches 1-3)      187,707 SCSI commands/s   31 % kernel CPU
+  v5 (patches 1-4)            0 SCSI commands/s    0 % kernel CPU
+
+With patch 4, the random zones filled by a 2 GiB write burst are still
+reclaimed once the target is idle, and on three 27 TB host-managed
+drives (7.2.10 with these patches) an idle pool went from about 155,000
+TEST UNIT READY commands per second per drive to none.
+
+Changes since v4:
+ - new patch 4 (above)
+ - patch 3: Reviewed-by from Damien Le Moal
+ - patches 1-3 otherwise unchanged
+
+illofspeed (4):
+  dm zoned: back off when reclaim finds no destination zone
+  dm zoned: do not reclaim a random zone into another random zone
+  dm zoned: keep polling for idle reclaim after a reclaim pass
+  dm zoned: do not busy-loop idle reclaim when no zone needs reclaim
+
+ drivers/md/dm-zoned-reclaim.c | 31 ++++++++++++++++++++++++++-----
+ 1 file changed, 26 insertions(+), 5 deletions(-)

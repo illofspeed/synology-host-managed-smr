@@ -1,0 +1,98 @@
+From 6b9853af39632afebf6f07eb1b95e28a407ee060 Mon Sep 17 00:00:00 2001
+From: illofspeed <22580385+illofspeed@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 13:00:30 +0000
+Subject: [PATCH v5 4/4] dm zoned: do not busy-loop idle reclaim when no zone needs
+ reclaim
+
+An idle target whose random (and cache) zones are all unmapped keeps its
+reclaim work running without pause:
+
+  - since commit 90a9b8693f1b ("dm zoned: reclaim random zones when
+    idle"), dmz_should_reclaim() returns true when the target is idle and
+    the total number of random (and cache) zones is non-zero, whether or
+    not any of them holds data;
+  - dmz_do_reclaim() then finds no candidate and returns -EBUSY;
+  - dmz_reclaim_work() runs dmz_check_dev(), which issues a TEST UNIT
+    READY to every device, and dmz_schedule_reclaim() requeues the work
+    with no delay because dmz_should_reclaim() is still true.
+
+Without the previous patch the loop stops when a reclaim pass ends while
+the target is busy; with it the worker keeps polling, so the loop runs
+whenever the target is idle. On three 27 TB host-managed drives used
+without cache devices (all random zones free) it kept about three CPUs
+busy and sent about 155,000 TEST UNIT READY commands per second to each
+drive while the target was idle.
+
+Only reclaim on idle when a random or cache zone actually holds data, and
+handle -EBUSY like -ENOSPC: nothing can progress and no I/O failed, so
+poll again after the idle period instead of rescheduling at once, and
+skip the device check. Use queue_delayed_work() for that poll so work an
+allocation has already queued is not postponed.
+
+Fixes: 90a9b8693f1b ("dm zoned: reclaim random zones when idle")
+Assisted-by: LLM
+---
+ drivers/md/dm-zoned-reclaim.c | 26 +++++++++++++++-----------
+ 1 file changed, 15 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/md/dm-zoned-reclaim.c b/drivers/md/dm-zoned-reclaim.c
+index f1f9adf..0d62ade 100644
+--- a/drivers/md/dm-zoned-reclaim.c
++++ b/drivers/md/dm-zoned-reclaim.c
+@@ -470,9 +470,10 @@ static unsigned int dmz_reclaim_percentage(struct dmz_reclaim *zrc)
+  */
+ static bool dmz_should_reclaim(struct dmz_reclaim *zrc, unsigned int p_unmap)
+ {
+-	unsigned int nr_reclaim;
++	unsigned int nr_reclaim, nr_unmap;
+ 
+ 	nr_reclaim = dmz_nr_rnd_zones(zrc->metadata, zrc->dev_idx);
++	nr_unmap = dmz_nr_unmap_rnd_zones(zrc->metadata, zrc->dev_idx);
+ 
+ 	if (dmz_nr_cache_zones(zrc->metadata)) {
+ 		/*
+@@ -483,10 +484,11 @@ static bool dmz_should_reclaim(struct dmz_reclaim *zrc, unsigned int p_unmap)
+ 		if (zrc->dev_idx == 0)
+ 			return false;
+ 		nr_reclaim += dmz_nr_cache_zones(zrc->metadata);
++		nr_unmap += dmz_nr_unmap_cache_zones(zrc->metadata);
+ 	}
+ 
+-	/* Reclaim when idle */
+-	if (dmz_target_idle(zrc) && nr_reclaim)
++	/* Reclaim when idle, but only if a random or cache zone holds data */
++	if (dmz_target_idle(zrc) && nr_reclaim > nr_unmap)
+ 		return true;
+ 
+ 	/* If there are still plenty of cache zones, do not reclaim */
+@@ -543,17 +545,19 @@ static void dmz_reclaim_work(struct work_struct *work)
+ 		dmz_nr_rnd_zones(zmd, zrc->dev_idx));
+ 
+ 	ret = dmz_do_reclaim(zrc);
++	if (ret == -ENOSPC || ret == -EBUSY) {
++		/*
++		 * No zone to copy into (-ENOSPC) or no zone to reclaim
++		 * (-EBUSY): nothing can progress now and no I/O failed.
++		 * Rescheduling immediately would spin; poll instead, without
++		 * postponing work that an allocation has already queued.
++		 */
++		queue_delayed_work(zrc->wq, &zrc->work, DMZ_IDLE_PERIOD);
++		return;
++	}
+ 	if (ret && ret != -EINTR) {
+ 		if (!dmz_check_dev(zmd))
+ 			return;
+-		if (ret == -ENOSPC) {
+-			/*
+-			 * No zone to copy into: nothing can progress now.
+-			 * Rescheduling immediately would spin; poll instead.
+-			 */
+-			mod_delayed_work(zrc->wq, &zrc->work, DMZ_IDLE_PERIOD);
+-			return;
+-		}
+ 	}
+ 
+ 	dmz_schedule_reclaim(zrc);
+-- 
+2.47.3
+
