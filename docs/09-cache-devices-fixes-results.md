@@ -1,8 +1,9 @@
 # 09 — Cache devices without a rebuild, three fixes, and what all-cached members change
 
-October 2026 on the reference system (DS3622xs+, DX1222, 3 × HC680, guest kernel Ubuntu mainline
-7.2.6). Everything here was done first in a lab VM with emulated host-managed drives (file-backed ZBC
-through tcmu-runner), then on the real pool.
+October 2026 on the reference system (DS3622xs+, DX1222, 3 × HC680). Earlier
+measurements used Ubuntu mainline 7.2.6; since 2026-10-13 the guest runs self-built
+7.2.10-zonenas rev 2. Lab results and real-pool observations are labelled separately
+below; different patch variants must not be treated as the same deployment.
 
 ## Contents
 
@@ -27,13 +28,18 @@ through tcmu-runner), then on the real pool.
 - With cache devices on the NAS, **leave DSM's SSD-cache threshold at its default (1024 KB)**. Caching
   the cache disks' streams on the NAS NVMe made bursts *slower* (the insert path tops out near
   170 MB/s) and floods the SSDs during every DSM Data Scrubbing.
-- Four bugs, all fixed with three small patches (`patches/`): dm-zoned idle reclaim copying random zone →
-  random zone forever on a cache-device target, dm-zoned's reclaim worker not re-arming its idle poll
-  (the reason for the reclaim kick in [05](05-operations-monitoring-performance.md)), `dmzadm --check`
-  segfaulting on two-device sets, and libahci leaving FIS-based switching off after a hot-plug on a port
-  multiplier. None of them had a public report or fix before this work; all three patches were sent upstream on
-  2026-10-10. The libahci fix was applied to the libata tree for Linux 7.4 on 2026-10-12 (commit 21d333ab); the
-  dm-zoned series and the dmzadm fix are at v3 under review on dm-devel (section 4).
+- Three patch files cover the dm-zoned reclaim problems, the `dmzadm --check`
+  fault and libahci FBS recovery. An additional dm-zoned fix, originally v5
+  patch 4, stops the idle CPU loop when no random/cache zone holds data.
+  The corrected combined patch includes it. **Replace and activate modules
+  that lack this fix, including copies obtained earlier on October 13.**
+- The idle loop produces high SCSI-layer TEST UNIT READY request counts;
+  libata completes those requests in software for SATA disks. Its measured
+  cost is kernel CPU, not a stream of physical ATA commands.
+- Dated upstream history: libahci was applied to libata for 7.4; dm-zoned
+  v4 was applied and then reverted on October 13. v6 is prepared, **not sent**;
+  the next submission must split bugfixes from enhancements. dmzadm v3
+  was under review at the handover. See [status](../patches/upstream/README.md#status).
 - **Never run `dmzadm --repair` on a member whose check reports invalid chunk mappings**: in the lab it
   turned one damaged map block into the loss of every chunk on the member (section 5.1).
 
@@ -134,21 +140,32 @@ kept with the author's notes; the benchmark script records drive bytes, cache fi
 
 ## 4. Bugs found, and the patches
 
-The two dm-zoned fixes (4.1, 4.2) were sent upstream on 2026-10-10 as a three-patch series:
-[[PATCH 0/3] dm zoned: fix two idle reclaim problems](https://lore.kernel.org/dm-devel/?q=s%3A%22dm+zoned%3A+fix+two+idle+reclaim+problems%22) on dm-devel. Now at v3
-(patch 2 reworded after Damien Le Moal's review of v2), sent 2026-10-11 and marked accepted in patchwork by
-2026-10-13 (Hannes Reinecke added a Reviewed-by for patch 1)
-([patchwork series 1183414](https://patchwork.kernel.org/series/1183414/)); current status in
-[patches/upstream/README.md](../patches/upstream/README.md#status). The split series
-is in [`patches/upstream/`](../patches/upstream/). The combined `patches/dm-zoned-reclaim.patch` is the v1 form (same
-behaviour; the module on the reference system was built from it), `patches/upstream/dm-zoned-reclaim-v3/` is the
-reviewed wording (patch 2 without the redundant `dmz_nr_cache_zones()` test).
+The dm-zoned series was first sent on 2026-10-10. v3 was accepted, then
+replaced by v4 on 2026-10-13; Mikulas subsequently reverted v4 from dm-7.4
+and requested bugfixes (with Fixes and Cc: stable) separately from the polling
+enhancement. v5 added the idle-loop fix as patch 4. Prepared v6 folds that
+change into patch 1 at Damien Le Moal’s request; **v6 has not been sent**.
+The dated [upstream status](../patches/upstream/README.md#status) distinguishes
+submission, maintainer-tree history and released code.
 
-All three patches are against the versions the reference system runs (kernel 7.2.6 = upstream master for
-the changed functions in October 2026; dm-zoned-tools 2.2.2 = master). They were built out of tree in the lab
-VM against the Ubuntu mainline headers; the exported symbol versions matched, so the stock `ahci.ko` loads on
-top of the patched `libahci.ko`. Install a rebuilt module under `/lib/modules/$(uname -r)/updates/`, run
-`depmod -a`, and rebuild the initramfs if the module is in it (libahci is, dm-zoned is not).
+The combined `patches/dm-zoned-reclaim.patch` contains v5 patches 1–4,
+with v6’s corrected error-path comment. Its resulting source matches v6.
+The changed reclaim source is identical in the cached 7.2.6 and 7.2.10
+trees, so the same patch applies to both. That source equivalence does not
+make compiled modules interchangeable. The reference deployment uses
+in-tree v3 plus zonenas patch 0004 on 7.2.10; it is a separate variant.
+
+**Activation is required.** A module lacking the idle-loop fix is affected
+regardless of download date. Build against the exact kernel headers for
+the kernel you intend to run. Install under `/lib/modules/<release>/updates/`,
+run `depmod -a <release>`, and regenerate that kernel’s initramfs when the
+module is included. Preserve a known boot fallback. After stopping writers
+and safely quiescing the pool, use a controlled **guest** reboot to activate
+the replacement; rebuilding or copying a `.ko` does not change a loaded
+module. Verify the booted release, the loaded `/sys/module/dm_zoned/srcversion`
+against the replacement module, idle request/CPU counters and actual buffer
+drain. `modinfo` alone describes the file on disk, not necessarily the
+loaded module. Do not force-unload an in-use storage module.
 
 ### 4.1 dm-zoned: idle reclaim loops random → random on a cache-device target (`patches/dm-zoned-reclaim.patch`)
 
@@ -157,19 +174,84 @@ sequential to a **random** destination zone. While the target is idle, reclaim t
 zone and moves it into another random zone, forever: on the reference system an idle member read and wrote
 ~72 MB/s nonstop with its zone counters frozen (≈12 TB/day of pointless drive I/O; in the lab 340 MB/s). It
 happens after a full member rebuild onto a cached member (every chunk mapped, no free sequential zone).
-Hunk 1 allows the random fallback only for cache source zones (moving a cache zone to the drive still frees
-cache space); hunk 2 makes a reclaim pass that finds no destination poll again after the idle period instead
-of rescheduling at once. Lab: same drive, same state, stock 340 → 44 MB/s of idle copying for four minutes,
+The change in `dmz_reclaim_rnd_data()` allows the random fallback only for cache source zones (moving a cache
+zone to the drive still frees cache space); the change in `dmz_reclaim_work()` makes a reclaim pass that finds
+no destination poll again after the idle period instead of rescheduling at once. Lab: same drive, same state, stock 340 → 44 MB/s of idle copying for four minutes,
 patched 0 MB/s.
 
-### 4.2 dm-zoned: the reclaim worker stops polling (same patch, hunk 3)
+### 4.2 dm-zoned: the reclaim worker stops polling (same patch)
 
 `dmz_reclaim_work()` re-arms its 10-second idle poll only on the "nothing to do" path. A pass that ends while
 the target is busy and has enough free zones queues nothing, so a buffer filled under load is never drained
 when the target goes idle — until something sends `dmsetup message <target> 0 reclaim`. That is the stall
 described in [05, 1.2.1](05-operations-monitoring-performance.md#121-the-idle-drain-can-stall-kernel-726-install-the-reclaim-kick)
-and the reason for `zonedpool-reclaim-kick.timer`. With the patch the worker always re-arms; on the real
-pool the emptied buffers were freed within six minutes of going idle, without the kick.
+and the reason for `zonedpool-reclaim-kick.timer`. With the patch, `dmz_schedule_reclaim()` always leaves an
+idle poll queued. The earlier v1-form patch freed the real pool’s buffers
+within six minutes of going idle; that observation was not made with the
+current combined patch. The prepared v6 lab run below records a drain by the
++90-second sample. Re-arming alone also makes the older idle CPU loop recur
+after later idle transitions; the combined patch includes the loop fix.
+
+### 4.2a dm-zoned: idle busy loop when no zone needs reclaim (same patch, since 2026-10-13)
+
+Since commit 90a9b8693f1b ("dm zoned: reclaim random zones when idle", 2020), `dmz_should_reclaim()` starts
+reclaim on an idle target whenever the target **has** random (or cache) zones, used or not. When none of them
+holds data, `dmz_do_reclaim()` finds nothing to do and returns -EBUSY; `dmz_reclaim_work()` then checks every
+device for media events (`dmz_check_dev()`, a TEST UNIT READY through the
+SCSI layer) and requeues itself with no delay. For SATA disks, libata
+answers TEST UNIT READY in software without sending it to the drive.
+Stock can remain in this loop throughout an idle period; it leaves when
+a pass finishes while the target is busy and has enough free zones. The
+earlier polling re-arm keeps the idle poll armed, so the loop can restart
+on each later idle period. Data throughput can stay at zero while kernel
+CPU usage and SCSI request counters rise rapidly.
+
+The reference observation on 2026-10-13 was about 155,000 SCSI requests/s
+per idle member and about three busy kernel CPUs. The fix requires a used
+random/cache zone before idle reclaim, and backs off on -EBUSY like
+-ENOSPC without the media-event check.
+
+| Idle lab target; 30-second sample | SCSI requests/s, total for 3 members |
+|---|---|
+| 7.2.6 stock | 160,262 |
+| 7.2.6 earlier guide patch | 191,955 |
+| 7.2.6 corrected guide patch | <1 (printed as integer 0) |
+| 7.3-rc7 stock, v5 comparison | 181,195 |
+| 7.3-rc7 upstream v4 | 187,707 |
+| 7.3-rc7 upstream v5 | <1 (printed as integer 0) |
+| 7.3-rc7 stock, v6 comparison | 193,476 |
+| 7.3-rc7 prepared v6 | 0.6 (18 requests / 30 s) |
+
+The CPU percentages in the old logs are not valid kernel-CPU measurements: the
+7.2.6 and v6 samplers accidentally included steal time and omitted IRQ time.
+Raw ticks were not retained, and the v5 sampler is unavailable here, so those
+percentages are omitted rather than recalculated. The SCSI request counts are unaffected.
+
+[Preserved lab logs and provenance](evidence/dm-zoned-idle-2026-10-13/README.md)
+support these results. In the v6 run, a 2 GiB burst consumed random zones
+and all three members were back to 6/6 free by the +90-second sample; the
+random-to-random reproducer then remained at 0 MB/s. The earlier claimed
+95-second drain on 7.2.6 is withdrawn: that sampler recorded the unused
+`0/0 cache` field, not the random-zone state needed to prove a drain.
+The former 13-disk reference spot check is omitted from this lab table.
+
+To inspect one **physical drive**, replace `sdX` below with its currently
+verified device name; `dz1` is a mapper and has no `device/iorequest_cnt`.
+The counter is hexadecimal. This read-only example prints a ten-second
+delta and an average; it neither identifies request opcodes nor measures
+physical ATA traffic. Sample with the pool idle and correlate with CPU
+usage before attributing a high rate to this loop.
+
+```sh
+counter=/sys/block/sdX/device/iorequest_cnt
+before_hex=$(cat "$counter") || exit 1
+before=$(printf "%d" "$before_hex") || exit 1
+sleep 10
+after_hex=$(cat "$counter") || exit 1
+after=$(printf "%d" "$after_hex") || exit 1
+[ "$after" -ge "$before" ] || exit 1
+awk -v delta="$((after - before))" 'BEGIN {printf "%d requests in 10 s (%.1f/s)\n", delta, delta / 10}'
+```
 
 ### 4.3 `dmzadm --check/--repair` segfault on two-device sets (`patches/dmzadm-check-conv-zones.patch`)
 
@@ -201,7 +283,8 @@ Tested on a real hot-plug on 2026-10-10: a drive inserted into a free bay of a m
 `re-enabling FBS after error handling` and "FBS is enabled". Two other drives in that group then read
 259 + 259 MB/s in parallel (one alone: 268 MB/s), so FBS was really back on. The
 `re-enabling FBS after error handling` line comes from the out-of-tree build in `patches/` (used for that test);
-the merged version has no extra log line, so on Linux 7.4+ look only for "FBS is enabled" after the hard reset.
+the maintainer-tree version has no extra log line. On a kernel verified to include commit 21d333ab,
+look only for "FBS is enabled" after the hard reset; a version number alone does not prove inclusion.
 
 **Merged:** applied to the libata tree for Linux 7.4 on 2026-10-12 as commit
 [21d333ab](https://git.kernel.org/libata/linux/c/21d333ab) (v4, after review). The merged code differs from

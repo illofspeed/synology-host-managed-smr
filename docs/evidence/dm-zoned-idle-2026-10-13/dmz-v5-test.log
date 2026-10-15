@@ -1,0 +1,27 @@
+2026-10-13 13:03:35 === kernel 7.3.0-rc7-dmzlab; built v4 CEEAD00CC53156C98DB8C82, v5 B8E89F59573AFA5EFB675B0
+2026-10-13 13:03:52 loaded stock: srcversion A4DDC969E121675F20BAD31, lab files OK
+2026-10-13 13:03:52 stock: idle 60 s
+2026-10-13 13:05:22 stock idle: SCSI commands/s (3 members) 181195, kernel CPU 32 % | dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:05:37 loaded v4: srcversion CEEAD00CC53156C98DB8C82, lab files OK
+2026-10-13 13:05:37 v4: idle 60 s
+2026-10-13 13:07:07 v4 idle: SCSI commands/s (3 members) 187707, kernel CPU 31 % | dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:07:20 loaded v5: srcversion B8E89F59573AFA5EFB675B0, lab files OK
+2026-10-13 13:07:20 v5: idle 60 s
+2026-10-13 13:08:50 v5 idle: SCSI commands/s (3 members) 0, kernel CPU 0 % | dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:08:50 === v5: idle reclaim after a 2 GiB burst
+2026-10-13 13:08:50 before: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:08:59 after burst: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:09:14 idle +15s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:09:29 idle +30s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:09:44 idle +45s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:09:59 idle +60s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:10:14 idle +75s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:10:29 idle +90s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:10:44 idle +105s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:10:59 idle +120s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:11:14 idle +135s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:11:29 idle +150s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:11:44 idle +165s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:11:59 idle +180s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:12:29 v5 after drain, idle: SCSI commands/s (3 members) 0, kernel CPU 0 % | dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 13:12:29 === done (v5 stays loaded; reboot returns to 7.2.6 and its own module)

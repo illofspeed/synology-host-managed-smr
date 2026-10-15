@@ -1,13 +1,13 @@
 #!/bin/sh
-# zonedpool-reclaim-kick — keep dm-zoned's idle buffer drain going (workaround, kernel 7.2.6;
-# the cause is fixed by patches/dm-zoned-reclaim.patch, under review upstream).
-#
-# dm-zoned re-arms its reclaim worker's 10 s idle poll only on the "reclaim not needed" path
-# (drivers/md/dm-zoned-reclaim.c:514 in v7.2.6). After a reclaim pass that ends while the target is
-# busy with more than 30 % free random zones, dmz_schedule_reclaim() does not re-queue the work
-# (:634-639), so once the pool goes idle nothing wakes reclaim and the random-zone buffer stays full.
-# The "reclaim" message re-evaluates dmz_should_reclaim(): it starts reclaim when the target is idle
-# (or free zones are <= 30 %) and does nothing otherwise. Safe to run at any time.
+# zonedpool-reclaim-kick — historical workaround for stalled idle polling on stock 7.2.x.
+# Prefer the corrected patches/dm-zoned-reclaim.patch; its idle poll needs no timer.
+# WARNING: on a stock module, a reclaim message can start the idle TEST UNIT READY
+# CPU loop when random/cache zones are empty, or after a legitimate drain finishes.
+# libata answers those SCSI requests in software for SATA disks; this is kernel CPU cost.
+# A used-zone guard would not prevent the post-drain loop. This unconditional historical
+# helper is retained for provenance, not recommended for stock-module installation.
+# Build AND activate the corrected module, verify it, then disable the old timer.
+# Upstream status: see patches/upstream/README.md; v4 was applied then reverted.
 set -u
 dmsetup ls --target zoned 2>/dev/null | awk '$2 ~ /^\(/ {print $1}' | while read -r t; do
   dmsetup message "$t" 0 reclaim 2>/dev/null ||

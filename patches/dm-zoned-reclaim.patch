@@ -1,48 +1,77 @@
 --- a/drivers/md/dm-zoned-reclaim.c
 +++ b/drivers/md/dm-zoned-reclaim.c
-@@ -290,7 +290,15 @@
+@@ -290,7 +290,13 @@
  again:
  	szone = dmz_alloc_zone(zmd, zrc->dev_idx,
  			       alloc_flags | DMZ_ALLOC_RECLAIM);
 -	if (!szone && alloc_flags == DMZ_ALLOC_SEQ && dmz_nr_cache_zones(zmd)) {
 +	/*
-+	 * Without a free sequential zone, moving a CACHE zone into a random
-+	 * zone of the zoned device still frees cache space. Moving a RANDOM
-+	 * zone into another random zone gains nothing: when the target is
-+	 * idle this repeats forever on the same zone (full-speed copying on
-+	 * an otherwise idle drive). Only fall back for cache zones.
++	 * If no free sequential zone is available, a cache zone can still be
++	 * moved into a free random zone of the zoned device, which frees cache
++	 * space. Do not do this for a random zone: moving it into another
++	 * random zone frees nothing and, on an idle target, repeats forever.
 +	 */
-+	if (!szone && alloc_flags == DMZ_ALLOC_SEQ && dmz_nr_cache_zones(zmd) &&
-+	    dmz_is_cache(dzone)) {
++	if (!szone && alloc_flags == DMZ_ALLOC_SEQ && dmz_is_cache(dzone)) {
  		alloc_flags = DMZ_ALLOC_RND;
  		goto again;
  	}
-@@ -542,9 +550,27 @@
+@@ -466,9 +472,10 @@
+  */
+ static bool dmz_should_reclaim(struct dmz_reclaim *zrc, unsigned int p_unmap)
+ {
+-	unsigned int nr_reclaim;
++	unsigned int nr_reclaim, nr_unmap;
+ 
+ 	nr_reclaim = dmz_nr_rnd_zones(zrc->metadata, zrc->dev_idx);
++	nr_unmap = dmz_nr_unmap_rnd_zones(zrc->metadata, zrc->dev_idx);
+ 
+ 	if (dmz_nr_cache_zones(zrc->metadata)) {
+ 		/*
+@@ -479,10 +486,11 @@
+ 		if (zrc->dev_idx == 0)
+ 			return false;
+ 		nr_reclaim += dmz_nr_cache_zones(zrc->metadata);
++		nr_unmap += dmz_nr_unmap_cache_zones(zrc->metadata);
+ 	}
+ 
+-	/* Reclaim when idle */
+-	if (dmz_target_idle(zrc) && nr_reclaim)
++	/* Reclaim when idle, but only if a random or cache zone holds data */
++	if (dmz_target_idle(zrc) && nr_reclaim > nr_unmap)
+ 		return true;
+ 
+ 	/* If there are still plenty of cache zones, do not reclaim */
+@@ -539,6 +547,16 @@
+ 		dmz_nr_rnd_zones(zmd, zrc->dev_idx));
+ 
+ 	ret = dmz_do_reclaim(zrc);
++	if (ret == -ENOSPC || ret == -EBUSY) {
++		/*
++		 * No zone to copy into (-ENOSPC) or no zone to reclaim
++		 * (-EBUSY): retrying at once cannot make progress and would
++		 * spin. Poll again after the idle period instead, without
++		 * postponing work that an allocation has already queued.
++		 */
++		queue_delayed_work(zrc->wq, &zrc->work, DMZ_IDLE_PERIOD);
++		return;
++	}
  	if (ret && ret != -EINTR) {
  		if (!dmz_check_dev(zmd))
  			return;
-+		if (ret == -ENOSPC) {
-+			/*
-+			 * No zone to copy into: nothing can progress now.
-+			 * Rescheduling immediately would spin; poll instead.
-+			 */
-+			mod_delayed_work(zrc->wq, &zrc->work, DMZ_IDLE_PERIOD);
-+			return;
-+		}
- 	}
- 
--	dmz_schedule_reclaim(zrc);
-+	/*
-+	 * Keep the worker alive: when a pass ends while the target is busy
-+	 * with enough free zones, dmz_schedule_reclaim() queues nothing and
-+	 * the idle poll is never re-armed, so a buffer filled under load is
-+	 * not drained once the target goes idle (until an external
-+	 * "reclaim" message). Poll again after the idle period instead.
-+	 */
-+	if (dmz_should_reclaim(zrc, dmz_reclaim_percentage(zrc)))
-+		mod_delayed_work(zrc->wq, &zrc->work, 0);
-+	else
-+		mod_delayed_work(zrc->wq, &zrc->work, DMZ_IDLE_PERIOD);
+@@ -629,7 +647,8 @@
  }
  
  /*
+- * Start reclaim if necessary.
++ * Start reclaim if necessary. Otherwise make sure that an idle poll stays
++ * queued, without delaying work that is already pending.
+  */
+ void dmz_schedule_reclaim(struct dmz_reclaim *zrc)
+ {
+@@ -637,4 +656,6 @@
+ 
+ 	if (dmz_should_reclaim(zrc, p_unmap))
+ 		mod_delayed_work(zrc->wq, &zrc->work, 0);
++	else
++		queue_delayed_work(zrc->wq, &zrc->work, DMZ_IDLE_PERIOD);
+ }

@@ -7,7 +7,9 @@ to monitor it, routine maintenance, and what to do when something breaks.
 >
 > - This has been tested on exactly one setup: a DS3622xs+ (DSM 7.4) with a DX1222 expansion
 >   unit, 3 x WD Ultrastar HC680 27 TB, and a Debian 13 / OpenMediaVault 8 guest in VMM on
->   kernel `7.2.6-070206-generic`. Everything else is untested.
+>   kernel `7.2.6-070206-generic` for the original tests. The reference guest moved
+>   to self-built `7.2.10-zonenas` rev 2 on 2026-10-13; historical measurements below
+>   retain their original kernel labels.
 > - It only works because the zoned drives sit behind a controller that DSM does not use for
 >   its own disks. On the DS3622xs+ that is the expansion unit's Marvell 88SE9235, passed
 >   through **whole** to the guest. If your zoned drives would share the controller that DSM
@@ -58,8 +60,8 @@ available as this buffer: about 250 GiB per drive. The buffer decides your write
 - **It only shrinks while the pool is idle.** Measured before LUKS was added: about 7 zones
   per minute per drive, so about 2 to 2.5 hours from full to empty. With LUKS, after a kick
   (below): about 8 zones per minute per drive, about 1.5 hours.
-- **On 7.2.6 the idle drain does not always start by itself.** See 1.2.1. Install the
-  `zonedpool-reclaim-kick` timer.
+- **On stock 7.2.6 the idle drain does not always start by itself.** Prefer the
+  corrected dm-zoned module. The old kick timer has an idle CPU-loop drawback (1.2.1).
 - **Once it is full, throughput drops to roughly a third to a half** and stays there. It does
   not collapse further and nothing fails.
 
@@ -86,7 +88,9 @@ buffer zones are in use: the buffer is nearly full. After a fresh format, with t
 filesystem just created on top, the reference drives showed `961/998 random` and
 `99560/99562 sequential`. The metrics script in section 2 exports the used ratio per mapper.
 
-#### 1.2.1 The idle drain can stall (kernel 7.2.6): install the reclaim kick
+<a id="121-the-idle-drain-can-stall-kernel-726-install-the-reclaim-kick"></a>
+
+#### 1.2.1 The idle drain can stall: use the corrected module; the kick timer is historical
 
 **Observed 2026-09-28:** after a 40-hour md repair ended, the pool was completely idle (no I/O
 on the drives, md or the LUKS device, no reclaim worker running), yet the buffers stayed at
@@ -104,32 +108,35 @@ free space to 30 % or less (`dm-zoned-metadata.c` line 2212), a target resume, a
 next large copy gets only about 31 % of the buffer (roughly 150 GB of data) before it slows
 down, instead of nearly all of it. It is not dangerous, only slower.
 
-**Workaround:** send the `reclaim` message regularly. It makes dm-zoned re-evaluate: it starts
-reclaim if the target is idle (or 30 % or less is free) and does nothing otherwise, so it is
-safe at any time.
+**Prefer the corrected module, not the old periodic kick.** A `reclaim`
+message can start a busy loop on stock dm-zoned when the target is idle
+and its random/cache zones are already empty, or once a legitimate drain
+finishes. The loop can continue until a pass ends while the target is busy
+with enough free zones. A used-zone guard would avoid empty-target kicks
+but would not fix the loop after draining.
+
+The repository retains `zonedpool-reclaim-kick` and its 15-minute timer
+as the historical stalled-poll workaround. It is no longer recommended
+for stock modules. The first recorded kick did drain the reference pool
+in about 1.5 hours, but that result did not establish idle CPU safety.
+
+The combined [dm-zoned patch](../patches/dm-zoned-reclaim.patch) fixes both
+the stalled poll and the idle busy loop. Build against the running kernel’s
+headers, install, and activate it with the controlled guest reboot procedure
+in [09, section 4](09-cache-devices-fixes-results.md#4-bugs-found-and-the-patches).
+Any module lacking the idle-loop fix (originally v5 patch 4) is affected,
+including copies obtained earlier on October 13. The corrected scheduler
+keeps its own idle poll armed, so the timer is unnecessary. After verifying
+the replacement is active, disable the old timer if installed:
 
 ```sh
-dmsetup message dz1 0 reclaim       # one-off, per mapper
+systemctl disable --now zonedpool-reclaim-kick.timer
 ```
 
-The repository ships a timer that does this for every zoned target every 15 minutes:
-
-```sh
-install -m 0755 scripts/guest/zonedpool-reclaim-kick /usr/local/sbin/
-install -m 0644 systemd/zonedpool-reclaim-kick.service systemd/zonedpool-reclaim-kick.timer /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now zonedpool-reclaim-kick.timer
-```
-
-On the reference pool the first kick started reclaim at once on all three drives (about
-35 MB/s read and 36 MB/s written per drive) and emptied the buffers in about 1.5 hours.
-Undo: `systemctl disable --now zonedpool-reclaim-kick.timer` and delete the three files. The
-fix (re-arm the idle poll after every pass) is hunk 3 of
-[`patches/dm-zoned-reclaim.patch`](../patches/dm-zoned-reclaim.patch)
-([09, 4.2](09-cache-devices-fixes-results.md#42-dm-zoned-the-reclaim-worker-stops-polling-same-patch-hunk-3));
-it was sent upstream on 2026-10-10 as part of the dm-zoned series, v3 under review on dm-devel.
-The kick timer remains the workaround for a stock 7.2.x module. Whether other kernel versions
-behave the same is untested.
+Upstream v4 was applied and then reverted on 2026-10-13; the next submission
+must separate bugfixes from the polling enhancement. See the dated
+[status](../patches/upstream/README.md#status), not an assumption that a
+release already contains these changes.
 
 ### 1.3 Measured throughput
 
@@ -162,7 +169,8 @@ same two 60-second tests ([03, step 2](03-guest-storage-stack.md#step-2---choose
 
 md RAID5 hands dm-zoned 4 KiB writes on every one of these kernels. **Why 7.2 is so much
 faster is unknown.** `block/blk-zoned.c` is byte-identical in 7.1.8 and 7.2, so do not credit
-zone write plugging. The author runs Ubuntu mainline 7.2.6.
+zone write plugging. These are historical measurements; since 2026-10-13 the
+reference guest runs self-built `7.2.10-zonenas` rev 2 with fixes in-tree.
 
 ### 1.4 The stress test of 2026-09-26
 
@@ -209,16 +217,22 @@ following a power event on the NAS:
 2. After the NAS had been shut down by mistake and powered on again, one reclaim worker was
    in D again after a clean boot. About an hour later it had cleared by itself.
 
-There is no upstream bug report or fix for this. The dm-zoned patches in
-[09, section 4](09-cache-devices-fixes-results.md#41-dm-zoned-idle-reclaim-loops-random--random-on-a-cache-device-target-patchesdm-zoned-reclaimpatch)
-address the idle random-to-random reclaim loop and the stalled poll, not this hang. A later review of the kernel code suggested
-a likely but unverified harmless mechanism: an idle reclaim loop that only sends TEST UNIT
-READY to the drive and moves no data. According to the same review, genuinely blocked threads
-would more likely wait in `dmz_reclaim_copy -> wait_on_bit_io`, a dm-zoned mutex,
-`scsi_block_when_processing_errors` (port-multiplier error recovery), or `blk_wait_io` in the
-per-disk `sdX_zwplugs_worker` thread (kernel 7.1 and later; its waits are invisible to the
-kernel's 120 s hung-task detector). The stacks of the two incidents were not recorded. That is
-why the metrics script now captures evidence automatically (2.7).
+The causes of these two incidents remain unproven. The idle reclaim CPU
+loop later reproduced on 2026-10-13
+([09, 4.2a](09-cache-devices-fixes-results.md#42a-dm-zoned-idle-busy-loop-when-no-zone-needs-reclaim-same-patch-since-2026-10-13))
+is a possible explanation for incident 1: the pool was idle, its random
+zones were free, and data counters did not move. Incident 2 has no recorded
+buffer/activity state establishing those conditions; an md resync may
+have been running. Both incidents showed one D-state worker, while the
+reproduced loop keeps workers mostly runnable on CPU. The match is partial.
+
+That confirmed loop produced roughly 155,000 SCSI-layer TEST UNIT READY
+requests per second per HC680 on the reference setup. libata completes
+these requests in software for SATA disks: this is kernel CPU cost, not
+evidence of that rate of physical ATA commands. The corrected patch fixes
+the loop, but is not a demonstrated fix for either historical incident.
+Their stacks were not recorded. Genuine blocking in copying, locking or
+device error recovery still requires the automatic evidence capture (2.7).
 
 To check by hand:
 
@@ -440,7 +454,7 @@ and on (job, instance, mapper, drive)
 | Situation | In D? | Sectors | Commands done | Alert |
 |---|---|---|---|---|
 | Busy reclaim (the normal case under load) | often | rising | rising | no |
-| Reclaim loop sending only TEST UNIT READY (suspected, harmless) | yes | flat | rising | no |
+| Idle reclaim loop sending only TEST UNIT READY ([09, 4.2a](09-cache-devices-fixes-results.md#42a-dm-zoned-idle-busy-loop-when-no-zone-needs-reclaim-same-patch-since-2026-10-13); fixed by the current patch) | sometimes | flat | rising | no |
 | Real hang | yes | flat | flat | **yes** |
 
 `Hc680ZoneWriteWorkerStuck` does the same for the `zwplugs` thread, with the command counter
@@ -448,8 +462,10 @@ only.
 
 > **Why the command counter:** the first version of the rule used only D state plus sectors.
 > A worker that loops on TEST UNIT READY moves no sectors but keeps completing commands, and
-> the kernel review suggested exactly that as the likely harmless explanation for the
-> incidents. The second counter separates that case from a real hang.
+> an earlier kernel review proposed that as an explanation for the incidents. The loop
+> was subsequently reproduced (09, 4.2a), but only incident 1 partially matches it; neither
+> incident has an established cause. The corrected patch fixes the reproduced loop. The
+> second counter still separates that activity from no-completion blocking on stock modules.
 >
 > **Why 20 minutes:** D state is sampled only every 5 minutes, so 20 minutes means four
 > consecutive samples. The drives complete thousands of commands per 10 seconds while
@@ -794,7 +810,7 @@ wrong target is a **surviving member**.
    froze them for **25 s** (the new drive was slow to spin up). In both cases the other members
    logged 0 errors: their commands waited and then completed. The DX1222 has three bays per
    port multiplier, so plugging a drive into a bay next to the pool's members freezes the pool
-   for that long. On kernels before 7.4 the same event can also leave FIS-based switching off on
+   for that long. On kernels lacking the fix in commit 21d333ab, the same event can also leave FIS-based switching off on
    that port until the next boot (`FBS is disabled` in the kernel log with no later `FBS is enabled`);
    the libahci patch in [09, 4.4](09-cache-devices-fixes-results.md#44-libahci-fis-based-switching-stays-off-after-a-hot-plug-patcheslibahci-fbs-reenablepatch)
    fixes it and was applied to the libata tree for Linux 7.4 as commit 21d333ab. If you run anything
@@ -1078,8 +1094,9 @@ hang, or the pool did not mount after a restart and a `dmz_rwq_*` worker is in D
 6. **After the reboot:** check `cat /proc/mdstat` and let any resync finish, then run a
    `check` (3.2). Watch for the worker again for a while.
 
-7. **Keep the evidence.** No upstream report or fix exists for this. dm-zoned is maintained
-   in the Linux device-mapper tree, and the evidence file is what a report would need.
+7. **Keep the evidence.** The historical incidents remain undiagnosed. The idle CPU
+   loop has a patch, but that does not establish the cause of a new blocked worker.
+   dm-zoned is maintained in the Linux device-mapper tree; a report needs its own evidence.
 
 > **Why not simply switch to an older kernel:** after the first incidents the author moved
 > the guest to Debian's 6.12 for stability. The re-seed that followed ran at about 25 MB/s.
@@ -1270,7 +1287,7 @@ stuck.
 | Old UUIDs after a rebuild or crash | The array or filesystem did not come up | Compare UUIDs (4.1) |
 | Editing `attach.conf` without restarting the watcher | The controller went to the old guest | Restart the watcher (4.4) |
 | Formatting the wrong drive during a replacement | Would destroy a degraded array | Check the serial three times (3.7) |
-| Trusting the idle drain on 7.2.6 | Buffers stayed two thirds full for hours on an idle pool | Install the reclaim-kick timer (1.2.1) |
+| Trusting the idle drain on stock 7.2.6 | Buffers stayed two thirds full for hours on an idle pool | Use the corrected module; old kick timer caveat in 1.2.1 |
 | Creating the array with `--run` | mdadm skipped its bitmap question and created no write-intent bitmap | A brief member drop-out costs a full rebuild; see [03, Step 5](03-guest-storage-stack.md#step-5---create-the-raid5) |
 | `mdadm-last-resort` with a slow mapper | 30 s after a partial incremental assembly it tried to start the array without the late member | Mask it for this array ([03, Step 5](03-guest-storage-stack.md#step-5---create-the-raid5)) |
 | Removing a member that is still rebuilding | `hot remove failed ... Device or resource busy` | Repeat `--remove` a few seconds after `--fail` (3.7) |
@@ -1285,7 +1302,7 @@ stuck.
 | [scripts/guest/zoned-pool-metrics](../scripts/guest/zoned-pool-metrics) | `/usr/local/sbin/zoned-pool-metrics` (0755), plus the timer in 2.2 |
 | [monitoring/prometheus-rules.yml](../monitoring/prometheus-rules.yml) | a file in your Prometheus rules directory |
 | [scripts/guest/zonedpool-reclaim-kick](../scripts/guest/zonedpool-reclaim-kick) | `/usr/local/sbin/zonedpool-reclaim-kick` (0755) |
-| [systemd/zonedpool-reclaim-kick.service](../systemd/zonedpool-reclaim-kick.service), [.timer](../systemd/zonedpool-reclaim-kick.timer) | `/etc/systemd/system/`, timer enabled (1.2.1) |
+| [systemd/zonedpool-reclaim-kick.service](../systemd/zonedpool-reclaim-kick.service), [.timer](../systemd/zonedpool-reclaim-kick.timer) | `/etc/systemd/system/`, historical workaround; unnecessary with the corrected module (1.2.1) |
 | [scripts/guest/zonedpool-volcache](../scripts/guest/zonedpool-volcache), [systemd/zonedpool-volcache.service](../systemd/zonedpool-volcache.service), [systemd/zonedpool-cryptopen.service.d/volcache.conf](../systemd/zonedpool-cryptopen.service.d/volcache.conf) | optional volume cache, [08, section 4](08-caching.md#4-a-volume-cache-between-the-raid-and-luks) |
 | [scripts/nas/flashcache-seq-skip.sh](../scripts/nas/flashcache-seq-skip.sh) | DSM Task Scheduler, boot-up, root ([08, section 5](08-caching.md#5-synology-make-the-ssd-cache-take-the-cache-disks-io)) |
 

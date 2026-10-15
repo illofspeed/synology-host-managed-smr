@@ -10,7 +10,9 @@ that comes back on its own after every reboot.
 >   ([02-synology-controller-passthrough.md](02-synology-controller-passthrough.md)).
 > - This has been tested on exactly one setup: a DS3622xs+ with a DX1222 expansion unit and
 >   3 x WD Ultrastar HC680 27 TB, Debian 13, OpenMediaVault 8.5.9 and kernel
->   `7.2.6-070206-generic`. Nothing else has been tested. The approach only works when the
+>   `7.2.6-070206-generic` for the original procedure and benchmarks. Since 2026-10-13 the
+>   reference guest runs self-built kernel.org 7.2.10 (`7.2.10-zonenas` rev 2) with
+>   the dm-zoned fixes in-tree. The approach only works when the
 >   zoned drives sit on a controller that DSM does not use for its own disks. That rules out,
 >   for example, a DS1821+ in this layout. See
 >   [01-requirements-and-risks.md](01-requirements-and-risks.md), including the NAS kernel
@@ -134,30 +136,28 @@ What is known:
   4096 on Zabbly vs 1280 on Ubuntu. This is unproven.
 - Debian's stock 6.12 kernel ran the stack correctly with no errors. It is only slow.
 
-**The author runs Ubuntu mainline 7.2.6, pinned in GRUB.** Know what that costs you:
+**Reference deployment since 2026-10-13:** self-built kernel.org 7.2.10,
+`7.2.10-zonenas` rev 2, with dm-zoned v3 plus the local idle-loop patch 0004
+in-tree. This replaces the earlier plan to move beyond 7.2.6. The table above
+remains a historical comparison; equivalent throughput measurements for the
+new build are not available. The Ubuntu 7.2.6 instructions below document the
+earlier tested installation path, not the current deployment recommendation.
 
-- The kernel is installed by hand, so apt delivers no security updates for it. You have to
-  watch <https://kernel.ubuntu.com/mainline/> yourself and re-test before you move.
-- Kernels 7.2.0 to 7.2.6 contain a SLUB freelist race that 7.2.7 fixes (commit
-  `570a6aaf6b52`). The only known trigger is a deliberate exploit, so the author rates the
-  risk as low. The plan is to move to the first 7.2.7-or-later build that is as fast as 7.2.6.
-- On 7.2.6, a dm-zoned reclaim worker got stuck in D state twice. Both times it happened
-  right after the array was reassembled following a power event on the host. Once it needed a
-  guest reboot, and once it cleared by itself. No upstream report or fix exists. It has only
-  been seen on 7.2.6, but the other kernels never ran long enough under the same conditions to
-  rule them out. The mitigation is monitoring, evidence capture and a reboot
-  ([05-operations-monitoring-performance.md](05-operations-monitoring-performance.md)).
-- On 7.2.6, dm-zoned's idle buffer drain does not always restart after a busy period, so the
-  write buffer can stay about two thirds full on an idle pool. Install the reclaim-kick timer
-  ([05, 1.2.1](05-operations-monitoring-performance.md#121-the-idle-drain-can-stall-kernel-726-install-the-reclaim-kick))
-  or run the patched dm-zoned module
-  ([09, 4.2](09-cache-devices-fixes-results.md#42-dm-zoned-the-reclaim-worker-stops-polling-same-patch-hunk-3);
-  fix sent upstream, under review).
-- Debian enables `xfs_scrub_all.timer` by default. On kernels built with XFS online scrub
-  (Debian's 7.1.8 and Zabbly's 7.2.7, for example), it runs a real full-media scan of the
-  pool once a month. Ubuntu's 7.2.6 is built without online scrub, so there the timer does
-  nothing. If you use a kernel with online scrub, decide whether you want that scan
-  ([05-operations-monitoring-performance.md](05-operations-monitoring-performance.md)).
+- Both self-built and manually installed mainline kernels need deliberate
+  security-update maintenance. Kernel 7.2.7 fixed the SLUB freelist race
+  (`570a6aaf6b52`) present in the older 7.2.0–7.2.6 builds.
+- The two historical D-state incidents on 7.2.6 remain undiagnosed. The idle
+  CPU loop later reproduced in [09, 4.2a](09-cache-devices-fixes-results.md#42a-dm-zoned-idle-busy-loop-when-no-zone-needs-reclaim-same-patch-since-2026-10-13)
+  is a possible explanation for incident 1 only; the fix is not proof of
+  either incident’s cause. Keep the evidence capture described in [05](05-operations-monitoring-performance.md).
+- Prefer the corrected dm-zoned module to the old reclaim-kick timer. On
+  stock modules, kicks can start the idle CPU loop when buffers are empty
+  or after they drain. Modules lacking the idle-loop fix (originally v5
+  patch 4), including copies obtained earlier on October 13, need a rebuild
+  **and activation** as described in [09, section 4](09-cache-devices-fixes-results.md#4-bugs-found-and-the-patches).
+- Debian enables `xfs_scrub_all.timer` by default. Ubuntu’s historical 7.2.6
+  build lacked online scrub; check the actual replacement kernel’s config
+  before assuming that timer is inert ([05](05-operations-monitoring-performance.md)).
 
 ### 2a. Install the Ubuntu mainline 7.2.6 kernel
 

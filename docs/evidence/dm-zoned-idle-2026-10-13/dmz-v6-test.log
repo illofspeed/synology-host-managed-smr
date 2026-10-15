@@ -1,0 +1,38 @@
+2026-10-13 15:56:52 === kernel 7.3.0-rc7-dmzlab; boot module srcversion A4DDC969E121675F20BAD31
+2026-10-13 15:57:11 loaded stock: srcversion A4DDC969E121675F20BAD31, lab files OK
+2026-10-13 15:57:11 stock: idle 60 s
+2026-10-13 15:58:41 stock idle: SCSI commands in 30 s (3 members) 5804292 = 193476/s, kernel CPU 30 % | dz1[6/6 random] dz2[6/6 random] dz3[6/6 random] 
+2026-10-13 15:58:55 loaded v6: srcversion B8E89F59573AFA5EFB675B0, lab files OK
+2026-10-13 15:58:55 v6: idle 60 s
+2026-10-13 16:00:25 v6 idle: SCSI commands in 30 s (3 members) 18 = 0/s, kernel CPU 0 % | dz1[6/6 random] dz2[6/6 random] dz3[6/6 random] 
+2026-10-13 16:00:25 === v6: idle reclaim after a 2 GiB burst
+2026-10-13 16:00:25 before: dz1[6/6 random] dz2[6/6 random] dz3[6/6 random] 
+2026-10-13 16:00:33 after burst: dz1[0/6 random] dz2[1/6 random] dz3[0/6 random] 
+2026-10-13 16:00:49 idle +15s: dz1[2/6 random] dz2[2/6 random] dz3[2/6 random] 
+2026-10-13 16:01:04 idle +30s: dz1[1/6 random] dz2[2/6 random] dz3[1/6 random] 
+2026-10-13 16:01:19 idle +45s: dz1[2/6 random] dz2[2/6 random] dz3[2/6 random] 
+2026-10-13 16:01:34 idle +60s: dz1[4/6 random] dz2[2/6 random] dz3[1/6 random] 
+2026-10-13 16:01:49 idle +75s: dz1[4/6 random] dz2[2/6 random] dz3[2/6 random] 
+2026-10-13 16:02:04 idle +90s: dz1[6/6 random] dz2[6/6 random] dz3[6/6 random] 
+2026-10-13 16:02:19 idle +105s: dz1[6/6 random] dz2[6/6 random] dz3[6/6 random] 
+2026-10-13 16:02:34 idle +120s: dz1[6/6 random] dz2[6/6 random] dz3[6/6 random] 
+2026-10-13 16:02:49 idle +135s: dz1[6/6 random] dz2[6/6 random] dz3[6/6 random] 
+2026-10-13 16:03:04 idle +150s: dz1[6/6 random] dz2[6/6 random] dz3[6/6 random] 
+2026-10-13 16:03:19 idle +165s: dz1[6/6 random] dz2[6/6 random] dz3[6/6 random] 
+2026-10-13 16:03:34 idle +180s: dz1[6/6 random] dz2[6/6 random] dz3[6/6 random] 
+2026-10-13 16:04:04 v6 after drain, idle: SCSI commands in 30 s (3 members) 18 = 0/s, kernel CPU 0 % | dz1[6/6 random] dz2[6/6 random] dz3[6/6 random] 
+2026-10-13 16:04:04 === v6: repro 2 (idle random->random loop on a two-device scsi_debug target, 60 s)
+[16:04:04] dm_zoned srcversion B8E89F59573AFA5EFB675B0
+[16:04:06] zoned device /dev/sdg: 32 zones of 64 MiB, 8 conventional
+[16:04:08] cache device /dev/loop0 (1024 MiB file)
+[16:04:09] filling 1920 MiB
+[16:04:28] after fill + drain: 48 zones 14/14 cache 1/7 random 0/8 sequential
+[16:04:28] now idle for 60 s, sampling the zoned device every 10 s (dm-zoned's idle period is 10 s)
+[16:04:38] read 0 MB/s, write 0 MB/s | zones 14/14 cache 1/7 random 0/8 sequential
+[16:04:48] read 0 MB/s, write 0 MB/s | zones 14/14 cache 1/7 random 0/8 sequential
+[16:04:58] read 0 MB/s, write 0 MB/s | zones 14/14 cache 1/7 random 0/8 sequential
+[16:05:08] read 0 MB/s, write 0 MB/s | zones 14/14 cache 1/7 random 0/8 sequential
+[16:05:18] read 0 MB/s, write 0 MB/s | zones 14/14 cache 1/7 random 0/8 sequential
+[16:05:28] read 0 MB/s, write 0 MB/s | zones 14/14 cache 1/7 random 0/8 sequential
+[16:05:28] RESULT: steady read+write with unchanged counters = bug reproduced; 0 MB/s = fixed module
+2026-10-13 16:05:28 === done (v6 stays loaded; nothing installed)

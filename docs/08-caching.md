@@ -320,7 +320,7 @@ while the guest's cache disks were busy. At normal priority the NAS rebuilt at
 - (Done in October: all three members cached, measured in
   [09, section 3](09-cache-devices-fixes-results.md#3-measured-plain-members-vs-cached-members).)
 - (The 7.2.6 idle-drain stall is a dm-zoned bug, fixed by the patch in
-  [09, section 4.2](09-cache-devices-fixes-results.md#42-dm-zoned-the-reclaim-worker-stops-polling-same-patch-hunk-3).)
+  [09, section 4.2](09-cache-devices-fixes-results.md#42-dm-zoned-the-reclaim-worker-stops-polling-same-patch).)
 
 ## Other pages
 

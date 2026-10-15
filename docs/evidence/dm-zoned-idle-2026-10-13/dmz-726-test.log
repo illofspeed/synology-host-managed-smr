@@ -1,0 +1,41 @@
+2026-10-13 15:03:00 === kernel 7.2.6-070206-generic; boot module srcversion 3AC0E37BA51A534C16713EB
+2026-10-13 15:03:16 loaded stock: srcversion B3FBB72A2625B5E9F04785C, lab files OK
+2026-10-13 15:03:16 stock: idle 60 s
+2026-10-13 15:04:46 stock idle: SCSI commands/s (3 members) 160262, kernel CPU 26 % | dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:05:01 loaded guide-old: srcversion A914F23F12DC524A6CC4455, lab files OK
+2026-10-13 15:05:01 guide-old: idle 60 s
+2026-10-13 15:06:31 guide-old idle: SCSI commands/s (3 members) 191955, kernel CPU 30 % | dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:06:42 loaded guide-new: srcversion 4A5748AEA40C9516CC826D1, lab files OK
+2026-10-13 15:06:42 guide-new: idle 60 s
+2026-10-13 15:08:12 guide-new idle: SCSI commands/s (3 members) 0, kernel CPU 0 % | dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:08:12 === guide-new: idle reclaim after a 2 GiB burst
+2026-10-13 15:08:12 before: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:08:21 after burst: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:08:36 idle +15s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:08:51 idle +30s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:09:06 idle +45s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:09:21 idle +60s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:09:36 idle +75s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:09:51 idle +90s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:10:06 idle +105s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:10:21 idle +120s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:10:36 idle +135s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:10:51 idle +150s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:11:06 idle +165s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:11:21 idle +180s: dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:11:51 guide-new after drain, idle: SCSI commands/s (3 members) 0, kernel CPU 0 % | dz1[0/0 cache] dz2[0/0 cache] dz3[0/0 cache] 
+2026-10-13 15:11:51 === guide-new: repro 2 (idle random->random loop on a two-device scsi_debug target, 60 s)
+[15:11:51] dm_zoned srcversion 4A5748AEA40C9516CC826D1
+[15:11:54] zoned device /dev/sdg: 32 zones of 64 MiB, 8 conventional
+[15:11:56] cache device /dev/loop0 (1024 MiB file)
+[15:11:56] filling 1920 MiB
+[15:12:15] after fill + drain: 48 zones 14/14 cache 1/7 random 0/8 sequential
+[15:12:15] now idle for 60 s, sampling the zoned device every 10 s (dm-zoned's idle period is 10 s)
+[15:12:25] read 0 MB/s, write 0 MB/s | zones 14/14 cache 1/7 random 0/8 sequential
+[15:12:35] read 0 MB/s, write 0 MB/s | zones 14/14 cache 1/7 random 0/8 sequential
+[15:12:45] read 0 MB/s, write 0 MB/s | zones 14/14 cache 1/7 random 0/8 sequential
+[15:12:55] read 0 MB/s, write 0 MB/s | zones 14/14 cache 1/7 random 0/8 sequential
+[15:13:05] read 0 MB/s, write 0 MB/s | zones 14/14 cache 1/7 random 0/8 sequential
+[15:13:15] read 0 MB/s, write 0 MB/s | zones 14/14 cache 1/7 random 0/8 sequential
+[15:13:15] RESULT: steady read+write with unchanged counters = bug reproduced; 0 MB/s = fixed module
+2026-10-13 15:13:16 === done (guide-new stays loaded; nothing installed)

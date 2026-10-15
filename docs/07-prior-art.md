@@ -555,8 +555,9 @@ above it.
   - Fixes from this repository, sent upstream in October 2026 (status table:
     [patches/upstream/README.md](../patches/upstream/README.md#status)):
     - "dm zoned: fix two idle reclaim problems" (3 patches, dm-devel; first sent
-      2026-10-10, v3 of 2026-10-11 under review),
-      <https://patchwork.kernel.org/series/1183414/>.
+      2026-10-10; v3 was accepted, replaced by v4, then v4 was reverted on 2026-10-13),
+      <https://patchwork.kernel.org/series/1183414/>; v5 of 2026-10-13 adds a fourth
+      patch for an idle busy loop present since 2020 (chapter 9, 4.2a).
     - "dmz: check: do not use the write pointer of conventional zones"
       (dm-zoned-tools; v3 under review), <https://patchwork.kernel.org/series/1183416/>.
     - Related, not dm-zoned: "ata: libahci: re-enable FBS after error handling on a
@@ -564,8 +565,9 @@ above it.
       <https://git.kernel.org/libata/linux/c/21d333ab>; needed by this stack on
       the 88SE9235 port multipliers, see [09](09-cache-devices-fixes-results.md).
 
-  **No public report or fix was found for a dm-zoned reclaim worker stuck in D
-  state**, which is what the author saw twice on 7.2.6.
+  **The two historical D-state incidents remain undiagnosed.** The later
+  reproduced idle CPU loop has a patch and partly fits incident 1, but is
+  not a proven cause of either incident ([09, 4.2a](09-cache-devices-fixes-results.md#42a-dm-zoned-idle-busy-loop-when-no-zone-needs-reclaim-same-patch-since-2026-10-13)).
 
 ### 4.4 md RAID5, LUKS2 and XFS on or above zoned devices
 
@@ -717,10 +719,11 @@ of this page:
 What this repository does **not** add:
 
 - Any new storage layer. dm-zoned, md, LUKS2 and XFS are standard upstream
-  components; the repository adds only three small fixes
+  components; the repository carries three patch files covering several fixes
   ([09, section 4](09-cache-devices-fixes-results.md#4-bugs-found-and-the-patches)):
   two kernel patches (libahci, merged into the libata tree for Linux 7.4;
-  dm-zoned, under review) and one dmzadm fix (under review).
+  dm-zoned, v4 applied then reverted pending a bugfix/enhancement split)
+  and one dmzadm fix (v3 under review at the October 13 handover).
 - Evidence that the design is safe in general. It goes against the published
   advice in [section 3](#3-published-advice-against-this-design), it has run
   for days on one system, and one NAS kernel panic remains unexplained
@@ -946,8 +949,10 @@ idle polling, `dmzadm --repair` destroying a member with a corrupt primary map, 
 off after a port-multiplier hot-plug, and **any published numbers for dm-zoned under md RAID**. dm-zoned's
 kernel code had no commits after 2026-07-15 and dm-zoned-tools none since 2024-05-30. Three of those gaps now
 have public fixes from this guide (chapter 9, `patches/upstream/README.md`): the libahci FIS-based-switching fix
-was applied to the libata tree for Linux 7.4 on 2026-10-12 (commit 21d333ab); the dm-zoned reclaim series (v3)
-and the `dmzadm --check` fix are under review on dm-devel.
+was applied to the libata tree for Linux 7.4 on 2026-10-12 (commit 21d333ab).
+The dm-zoned v4 series was applied and then reverted on October 13; v5 was sent
+and v6 prepared but not sent. The next submission must split bugfixes from
+enhancements. The `dmzadm --check` v3 fix was under review at that handover.
 
 Known in part: the write-twice mechanism of dm-zoned (Reinecke, SDC 2020), md RAID5's 4 KiB discard
 granularity (linux-raid, 2019), DSM's `skip_seq_thresh_kb` (007revad's Synology_enable_sequential_IO), the

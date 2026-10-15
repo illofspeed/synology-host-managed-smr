@@ -46,7 +46,7 @@ changing anything, what does not work, and what can go wrong.
 | DSM's own controller | Marvell 88SE1475, PCI ID `1b4b:1475`, Synology's `mv14xx` driver | Runs all 12 internal bays. **Never** unbound, reset or passed through |
 | Drives | 3 × WD Ultrastar DC HC680 27 TB (`WSH722870AL…`) | 24.6 TiB each, 256 MiB zones, 1,006 conventional + 99,578 sequential-write-required zones, `max_open_zones` 128 |
 | Hypervisor | DSM Virtual Machine Manager | Controller hot-plugged into the running guest with `virsh attach-device --live` |
-| Guest | Debian 13 / OpenMediaVault 8, 4 vCPU, Q35 machine | Kernel: Ubuntu mainline `7.2.6-070206-generic` |
+| Guest | Debian 13 / OpenMediaVault 8, 4 vCPU, Q35 machine | Kernel: self-built `7.2.10-zonenas` rev 2 since 2026-10-13; original benchmarks on Ubuntu mainline 7.2.6 |
 | Storage stack | dm-zoned per drive → md RAID5 → LUKS2 → XFS | 49.1 TiB usable ([03](03-guest-storage-stack.md)) |
 
 ```text
@@ -481,16 +481,19 @@ suggests.
 
 ### 7.5 Kernel and software maturity
 
-- The fast kernel is a manually installed Ubuntu mainline build. It gets no
-  automatic security updates and has no production support. Keep a packaged
-  kernel installed as a boot fallback.
+- The original fast-kernel measurements used Ubuntu mainline 7.2.6. Since
+  2026-10-13 the reference system uses a self-built 7.2.10 kernel with fixes
+  in-tree. Both paths require manual security maintenance; keep a suitable
+  packaged kernel as a boot fallback.
 - Versions 7.2.0–7.2.6 have a SLUB freelist race that 7.2.7 fixes. It was
   judged low risk because the only known trigger is a deliberate exploit.
 - On 7.2.6, a dm-zoned reclaim worker got stuck in D state twice, both times
   right after the array was reassembled following a host power event. Once it
-  needed a guest reboot. The other time it cleared by itself. No upstream
-  report or fix exists. The mitigation is monitoring, automatic evidence
-  capture, and a reboot ([05](05-operations-monitoring-performance.md)).
+  needed a guest reboot. The other time it cleared by itself. Their causes
+  remain unproven; the later reproduced idle loop is a possible explanation
+  for incident 1, and the corrected patch fixes that loop
+  ([09, 4.2a](09-cache-devices-fixes-results.md#42a-dm-zoned-idle-busy-loop-when-no-zone-needs-reclaim-same-patch-since-2026-10-13)).
+  Retain monitoring, automatic evidence capture and the recovery procedure ([05](05-operations-monitoring-performance.md)).
   Watch out for a false alarm here: a busy reclaim worker also sits in D state
   for long periods. It is a hang only if the worker is in D **and** the drives
   complete no commands.
@@ -545,7 +548,7 @@ Plugging or pulling any drive behind one of the DX1222's port multipliers freeze
 on that multiplier while libata recovers it: **12 s** for a pull and **25 s** for an insert in
 the test of 2026-09-28. The other drives lost no data and logged no errors, but every I/O to
 them waited. See [05, section 3.7](05-operations-monitoring-performance.md#37-replacing-a-drive-tested-2026-09-28).
-On kernels before 7.4 the same event can also leave FIS-based switching off on that port until
+On kernels lacking the fix in commit `21d333ab` the same event can also leave FIS-based switching off on that port until
 the next boot, which halves parallel reads from the other drives in the group; the guide's libahci
 patch fixes it and was applied to the libata tree for Linux 7.4 as commit 21d333ab
 ([09, 4.4](09-cache-devices-fixes-results.md#44-libahci-fis-based-switching-stays-off-after-a-hot-plug-patcheslibahci-fbs-reenablepatch)).

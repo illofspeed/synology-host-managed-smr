@@ -1,0 +1,43 @@
+#!/bin/bash
+# Lab VM 9020 on 7.2.6: idle busy-loop measurement for stock / guide-old (published patches/dm-zoned-reclaim.patch)
+# / guide-new (v5 1-4 combined), then idle reclaim after a 2 GiB burst and repro 2 on guide-new. Same swap logic as
+# /usr/local/sbin/dmz-v5-test. Leaves guide-new loaded; installs nothing.
+set -uo pipefail
+exec > >(tee -a /var/log/dmz-726-test.log) 2>&1
+log(){ echo "$(date "+%F %T") $*"; }; fail(){ log "STOP: $*"; exit 4; }
+K=$(uname -r); G=/root/g726; DEVS="sdb sdc sdd"
+[ "$K" = 7.2.6-070206-generic ] || fail "not running 7.2.6 ($K)"
+cnt(){ local t=0; for d in $DEVS; do t=$(( t + $(cat /sys/block/$d/device/iorequest_cnt) )); done; echo $t; }
+zones(){ for m in dz1 dz2 dz3; do printf "%s[%s] " $m "$(dmsetup status $m | grep -oE "[0-9]+/[0-9]+ (random|cache)" | head -1)"; done; }
+measure(){ local c1 c2; c1=$(cnt); read -r _ a1 b1 s1 i1 w1 x1 y1 z1 _ < /proc/stat; sleep 30; c2=$(cnt); read -r _ a2 b2 s2 i2 w2 x2 y2 z2 _ < /proc/stat
+  local tot=$(( (a2+b2+s2+i2+w2+x2+y2+z2)-(a1+b1+s1+i1+w1+x1+y1+z1) ))
+  log "$1: SCSI commands/s (3 members) $(( (c2-c1)/30 )), kernel CPU $(( 100*((s2-s1)+(y2-y1)+(z2-z1))/tot )) % | $(zones)"; }
+swap(){ systemctl stop nfs-server smbd rsync 2>/dev/null; systemctl stop export-media.mount srv-hc680.mount 2>/dev/null
+  findmnt -n /srv/hc680 >/dev/null && fail "pool still mounted"
+  systemctl stop systemd-cryptsetup@hc680crypt zonedpool-cryptopen 2>/dev/null
+  cryptsetup status hc680crypt >/dev/null 2>&1 && { cryptsetup close hc680crypt || fail "luks close"; }
+  mdadm --stop /dev/md127 >/dev/null || fail "md stop"; for t in dz1 dz2 dz3; do dmsetup remove $t || fail "remove $t"; done
+  sleep 2; rmmod dm_zoned || fail rmmod; insmod "$1" || fail "insmod $1"
+  /usr/local/sbin/zonedpool-dmzassemble; sleep 3; [ -b /dev/md127 ] || mdadm --assemble /dev/md/hc680 /dev/mapper/dz1 /dev/mapper/dz2 /dev/mapper/dz3 >/dev/null || fail "md assemble"
+  sleep 2; grep -A1 "^md127" /proc/mdstat | grep -q "\[3/3\] \[UUU\]" || fail "md127 not [UUU]"
+  systemctl restart systemd-cryptsetup@hc680crypt 2>/dev/null || systemctl restart zonedpool-cryptopen
+  systemctl restart srv-hc680.mount export-media.mount; systemctl start nfs-server smbd rsync 2>/dev/null
+  findmnt -n /srv/hc680 >/dev/null || fail "not mounted"
+  echo 3 > /proc/sys/vm/drop_caches; ( cd /srv/hc680 && sha256sum -c --quiet /root/lab-sums-before.txt ) || fail "CHECKSUM MISMATCH"
+  log "loaded $2: srcversion $(cat /sys/module/dm_zoned/srcversion), lab files OK"; }
+grep -A1 "^md127" /proc/mdstat | grep -q "\[3/3\] \[UUU\]" || fail "md127 not [UUU] at start"
+systemctl stop zonedpool-reclaim-kick.timer
+log "=== kernel $K; boot module srcversion $(cat /sys/module/dm_zoned/srcversion)"
+for m in stock:$G/stock/dm-zoned.ko guide-old:$G/guide-old/dm-zoned.ko guide-new:$G/guide-new/dm-zoned.ko; do
+  swap "${m#*:}" "${m%%:*}"; log "${m%%:*}: idle 60 s"; sleep 60; measure "${m%%:*} idle"
+done
+log "=== guide-new: idle reclaim after a 2 GiB burst"
+log "before: $(zones)"; dd if=/dev/urandom of=/srv/hc680/g726-burst.bin bs=1M count=2048 oflag=direct status=none; sync
+log "after burst: $(zones)"
+for i in $(seq 1 12); do sleep 15; log "idle +$((i*15))s: $(zones)"; done
+measure "guide-new after drain, idle"
+rm -f /srv/hc680/g726-burst.bin; sync
+log "=== guide-new: repro 2 (idle random->random loop on a two-device scsi_debug target, 60 s)"
+bash $G/src/repro/2-dm-zoned-idle-reclaim-loop.sh 60 || log "repro 2 exit $?"
+log "=== done (guide-new stays loaded; nothing installed)"
+systemctl start zonedpool-reclaim-kick.timer

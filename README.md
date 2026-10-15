@@ -66,7 +66,7 @@ Synology DS3622xs+  (DSM 7.4, Linux 4.4.302)
 │        │   - unbind from ahci -> bind to vfio-pci -> virsh attach-device --live
 │        │   - repeats after every guest start (VMM regenerates the domain on power-on)
 │        ▼
-└── VMM guest: Debian 13 / OpenMediaVault 8, Q35, 4 vCPU, kernel 7.2.6-070206-generic
+└── VMM guest: Debian 13 / OpenMediaVault 8, Q35, 4 vCPU, kernel 7.2.10-zonenas rev 2 (since 2026-10-13)
          │
          │  HC680      HC680      HC680      host-managed; appear 1-3 min after the attach
          │    │          │          │
@@ -110,8 +110,9 @@ including the final sync.
 
 md RAID5 hands dm-zoned 4 KiB writes on every one of these kernels. **Why 7.2
 is faster is unknown.** `block/blk-zoned.c` is byte-identical in 7.1.8 and 7.2,
-so it is not zone write plugging. The author runs Ubuntu mainline 7.2.6, pinned
-in GRUB.
+so it is not zone write plugging. These are historical measurements. Since 2026-10-13 the
+reference guest runs a self-built kernel.org 7.2.10 (`7.2.10-zonenas` rev 2),
+with the dm-zoned fixes in-tree. That build has not been compared using this exact kernel table.
 
 **Behaviour under sustained load** (kernel 7.2.6, stress test on 2026-09-26: a
 Hyper Backup seed, a ~3 TB rsync push and an md parity repair at the same time):
@@ -181,11 +182,14 @@ below were an experiment.
 - 1.5 TiB of fresh writes: plain members **201 MB/s for ~500 GiB, then 45 MB/s (~7 h)**; every member
   cached, NAS SSD-cache threshold at DSM's default: **155 MB/s, then 75–117 MB/s (5.1 h)**, drives writing
   each byte about once instead of almost three times.
-- Three bugs found and patched (dm-zoned reclaim, `dmzadm --check`, libahci FBS), plus a drill in which
-  `dmzadm --repair` destroyed a member's data — and how to recover instead. All three fixes were
-  [sent upstream](patches/upstream/README.md#status) on 2026-10-10; the libahci fix was merged into the libata
-  tree for Linux 7.4 on 2026-10-12, and the dm-zoned series was accepted by the device-mapper maintainers
-  (patchwork, 2026-10-13).
+- Three patch files fix dm-zoned reclaim, `dmzadm --check` and libahci FBS problems;
+  a separate drill showed how `dmzadm --repair` can destroy a damaged member.
+  [Submission history](patches/upstream/README.md#status): libahci was applied to the
+  libata tree for 7.4; dm-zoned v4 was applied and then reverted on 2026-10-13.
+  An additional dm-zoned fix, originally patch 4 of v5, stops an idle busy loop.
+  **Replace and activate any module lacking that idle-loop fix, including copies
+  obtained earlier on October 13.** A rebuild alone does not replace a loaded module
+  ([09, 4.2a](docs/09-cache-devices-fixes-results.md#42a-dm-zoned-idle-busy-loop-when-no-zone-needs-reclaim-same-patch-since-2026-10-13)).
 - Everything is in [09 — Cache devices without a rebuild, fixes, results](docs/09-cache-devices-fixes-results.md).
 
 | Other measurements | Result |
@@ -208,22 +212,23 @@ below were an experiment.
 2. **Not supported by Synology.** VMM has no PCI passthrough; the controller is
    attached with `virsh` as root, outside VMM. Any DSM update may change what
    this depends on.
-3. **A dm-zoned reclaim worker got stuck in D state twice** on 7.2.6, both
-   times right after the array was reassembled following a power event on the
-   NAS. Once it needed a guest reboot; once it cleared by itself. No upstream
-   report or fix exists. The mitigation is monitoring that tells a hang from
-   busy reclaim, automatic evidence capture, and a reboot. Separately, 7.2.6's
-   idle buffer drain can stall; the dm-zoned patch in `patches/` fixes it
-   ([09, 4.2](docs/09-cache-devices-fixes-results.md#42-dm-zoned-the-reclaim-worker-stops-polling-same-patch-hunk-3);
-   fix accepted upstream, not yet in a release) and a 15-minute reclaim-kick timer works
-   around it on a stock module.
+3. **Two historical D-state incidents remain undiagnosed.** Both occurred on 7.2.6
+   after reassembly following a NAS power event. Incident 1 partly fits the later
+   reproduced idle CPU loop; incident 2 lacks the buffer/activity evidence needed
+   to establish that link. Neither has captured stacks. The corrected dm-zoned
+   patch fixes that loop and the stalled idle poll, but is not a proven fix for
+   either incident. Keep monitoring and evidence capture
+   ([05, 2](docs/05-operations-monitoring-performance.md#2-monitoring)).
+   Prefer the corrected module to the old reclaim-kick timer: a kick on stock
+   dm-zoned can start the CPU loop when reclaim runs out of work.
 4. **It goes against published advice.** Western Digital's zoned storage
    documentation does not recommend dm-zoned, and nobody else was found
    running md RAID on top of it ([07](docs/07-prior-art.md)).
 5. **Throughput is uneven.** It drops to roughly 40–70 MB/s once the dm-zoned
    buffer is full, and it depends heavily on the guest kernel.
-6. **The fast kernel is a hand-installed mainline build**, with no automatic
-   security updates. Kernels 7.2.0–7.2.6 have a SLUB freelist race that 7.2.7
+6. **The reference kernel is maintained manually**, with no automatic security
+   updates. The earlier fast-kernel measurements used Ubuntu mainline 7.2.6. The
+   current kernel.org 7.2.10 build includes later stable fixes. Kernels 7.2.0–7.2.6 have a SLUB freelist race that 7.2.7
    fixes (rated low risk: the only known trigger is a deliberate exploit).
 7. **Ways to lose data:** detaching the wrong controller; a NAS crash during
    writes; two failed members (RAID5 survives one); skipping the full `repair`
@@ -318,10 +323,10 @@ Read in this order:
 │   └── dmz-cache-layout-SPEC.md           on-disk layout and the source references behind the tools
 ├── repro/                                 reproducers on a RAM-backed scsi_debug zoned disk (09, 4.5)
 ├── patches/                               kernel 7.2 / dm-zoned-tools 2.2.2 out-of-tree copies (09, section 4)
-│   ├── dm-zoned-reclaim.patch             no random→random loop, reclaim worker keeps polling
+│   ├── dm-zoned-reclaim.patch             no random→random loop, reclaim worker keeps polling, no idle busy loop (since 2026-10-13)
 │   ├── dmzadm-check-conv-zones.patch      no segfault checking two-device sets
-│   ├── libahci-fbs-reenable.patch         FBS back on after port-multiplier error handling (merged in Linux 7.4 as 21d333ab; this copy keeps one extra info print)
-│   └── upstream/                          as sent to the lists (v1–v4), status table, prepare and reply scripts
+│   ├── libahci-fbs-reenable.patch         FBS back on after port-multiplier error handling (queued for Linux 7.4 as 21d333ab; verify inclusion in the running kernel; this copy keeps one extra info print)
+│   └── upstream/                          as sent to the lists (v1–v5), status table, prepare and reply scripts
 ├── systemd/                               the late boot chain in the guest, plus the kick timer
 │   ├── zonedpool-dmzassemble.service
 │   ├── zonedpool-mdassemble.service
@@ -349,7 +354,7 @@ The exact names and messages this guide is about, for people searching for them:
 Synology DS3622xs+, DX1222 expansion unit, DSM 7.4, Virtual Machine Manager (VMM), `virsh attach-device`,
 `vfio-pci`, Marvell 88SE9235 and 88SE1475 (`mv14xx`), 88SM9705 port multiplier, `Direct-Access-ZBC`
 (`/dev/sg` only, no `/dev/sd`), dm-zoned, `dmzadm --format` / `--check` / `--repair`, dm-zoned cache device,
-md RAID5 on zoned drives, LUKS2, XFS, OpenMediaVault 8, kernel 7.2.6 (`7.2.6-070206-generic`), Hyper Backup
+md RAID5 on zoned drives, LUKS2, XFS, OpenMediaVault 8, kernel 7.2.10-zonenas rev 2 since 2026-10-13 (earlier benchmarks on `7.2.6-070206-generic`), Hyper Backup
 rsync target, `skip_seq_thresh_kb` (DSM SSD-cache sequential skip), `FBS is disabled`,
 `softreset failed (device not ready)`, zoned btrfs ENOSPC data loss, zonefs, tcmu-runner and `scsi_debug zbc=managed`
 emulation.
