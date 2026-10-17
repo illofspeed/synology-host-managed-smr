@@ -125,7 +125,7 @@ the stalled poll and the idle busy loop. Build against the running kernel’s
 headers, install, and activate it with the controlled guest reboot procedure
 in [09, section 4](09-cache-devices-fixes-results.md#4-bugs-found-and-the-patches).
 Any module lacking the idle-loop fix (originally v5 patch 4) is affected,
-including copies obtained earlier on October 13. The corrected scheduler
+including copies of `patches/dm-zoned-reclaim.patch` obtained before commit e22a5a9 (2026-10-15, 18:37 UTC). The corrected scheduler
 keeps its own idle poll armed, so the timer is unnecessary. After verifying
 the replacement is active, disable the old timer if installed:
 
@@ -168,8 +168,8 @@ same two 60-second tests ([03, step 2](03-guest-storage-stack.md#step-2---choose
 | Zabbly `7.2.7` | 58-69 MiB/s (3 runs) | 210.7 MiB/s |
 
 md RAID5 hands dm-zoned 4 KiB writes on every one of these kernels. **Why 7.2 is so much
-faster is unknown.** `block/blk-zoned.c` is byte-identical in 7.1.8 and 7.2, so do not credit
-zone write plugging. These are historical measurements; since 2026-10-13 the
+faster is unknown.** `block/blk-zoned.c` barely changed between 7.1.8 and 7.2.6: the only differences are in setting up and tearing down the zone write plug workqueue,
+not the write path, so zone write plugging is an unlikely explanation. These are historical measurements; since 2026-10-13 the
 reference guest runs self-built `7.2.10-zonenas` rev 2 with fixes in-tree.
 
 ### 1.4 The stress test of 2026-09-26
@@ -810,10 +810,10 @@ wrong target is a **surviving member**.
    froze them for **25 s** (the new drive was slow to spin up). In both cases the other members
    logged 0 errors: their commands waited and then completed. The DX1222 has three bays per
    port multiplier, so plugging a drive into a bay next to the pool's members freezes the pool
-   for that long. On kernels lacking the fix in commit 21d333ab, the same event can also leave FIS-based switching off on
+   for that long. On kernels lacking the fix in commit 23eab9e8, the same event can also leave FIS-based switching off on
    that port until the next boot (`FBS is disabled` in the kernel log with no later `FBS is enabled`);
    the libahci patch in [09, 4.4](09-cache-devices-fixes-results.md#44-libahci-fis-based-switching-stays-off-after-a-hot-plug-patcheslibahci-fbs-reenablepatch)
-   fixes it and was applied to the libata tree for Linux 7.4 as commit 21d333ab. If you run anything
+   fixes it and was applied to the libata tree for Linux 7.4 as commit 23eab9e8. If you run anything
    with short timeouts on the pool, stop it first. The
    conservative route still exists: shut the guest down cleanly, swap the drive, start the
    guest; the watcher re-attaches the controller. Remember that starting a guest that carries

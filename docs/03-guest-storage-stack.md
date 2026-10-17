@@ -127,8 +127,9 @@ What is known:
   4096 bytes on x86, and dm-zoned is bio-based, so nothing merges the writes. Kernel 7.2
   simply gets through far more of them: during the test, one member received about 21,000
   writes/s on 7.2.6 compared with about 3,200/s before.
-- **Nobody knows why 7.2 is faster.** It is not the zoned block layer: `block/blk-zoned.c` is
-  byte-identical in 7.1.8 and 7.2.x. Do not attribute the speed-up to zone write plugging.
+- **Nobody knows why 7.2 is faster.** Probably not the zoned block layer: `block/blk-zoned.c`
+  barely changed between 7.1.8 and 7.2.6 (5 hunks, all in zone write plug workqueue setup and
+  teardown, none in the write path), so zone write plugging is an unlikely explanation.
 - The gap between the Ubuntu and Zabbly 7.2 builds is not caused by code changes. 7.2.7 and
   7.2.8 contain no changes to dm-zoned, md/raid5, dm-crypt, dm core, blk-zoned,
   mq-deadline, libata/ahci/port multipliers or sd/sd_zbc. The difference is probably build
@@ -153,7 +154,7 @@ earlier tested installation path, not the current deployment recommendation.
 - Prefer the corrected dm-zoned module to the old reclaim-kick timer. On
   stock modules, kicks can start the idle CPU loop when buffers are empty
   or after they drain. Modules lacking the idle-loop fix (originally v5
-  patch 4), including copies obtained earlier on October 13, need a rebuild
+  patch 4), including copies of `patches/dm-zoned-reclaim.patch` obtained before commit e22a5a9 (2026-10-15, 18:37 UTC), need a rebuild
   **and activation** as described in [09, section 4](09-cache-devices-fixes-results.md#4-bugs-found-and-the-patches).
 - Debian enables `xfs_scrub_all.timer` by default. Ubuntu’s historical 7.2.6
   build lacked online scrub; check the actual replacement kernel’s config

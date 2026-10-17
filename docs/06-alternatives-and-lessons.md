@@ -559,8 +559,9 @@ What this taught:
    21,000 writes/s instead of about 3,200/s, with the same 4.0 KiB write
    size.
 2. **Do not guess the cause.** md RAID5 sends dm-zoned 4 KiB writes on every
-   kernel, and `block/blk-zoned.c` is byte-identical in 7.1.8 and 7.2.x. **Why
-   7.2 is faster is unknown.** It is not zoned write plugging. The gap between
+   kernel, and `block/blk-zoned.c` barely changed between 7.1.8 and 7.2.6
+   (only zone write plug workqueue setup and teardown). **Why
+   7.2 is faster is unknown.** Zone write plugging is an unlikely explanation. The gap between
    Ubuntu's and Zabbly's 7.2 builds is not explained by code changes either:
    7.2.7 and 7.2.8 changed nothing in dm-zoned, md/raid5, dm-crypt, dm core,
    blk-zoned, mq-deadline, libata/AHCI/port multipliers or sd/sd_zbc. It is

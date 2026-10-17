@@ -45,7 +45,9 @@ measurements taken on it, and the failures found on the way.
 > Synology's `mv14xx` driver, the driver of DSM's **own** controller, a few
 > minutes after the passed-through 88SE9235 had been attached to a freshly
 > started guest, while heavy writes went through it. Both known crashes of this
-> NAS fit that pattern (2 of 2), but the mechanism is **not proven**. Since
+> NAS coincided with a start or reset of a guest carrying the 9235 (the uncaptured
+> 2026-09-19 reset happened in the same second as a watchdog reset of the guest
+> then carrying it), but the mechanism is **not proven**. Since
 > then the setup has carried many hours of heavy I/O without a recurrence. If
 > you build this, you accept that risk on your own hardware. **Back up the
 > NAS's own data first.** Details:
@@ -109,8 +111,9 @@ including the final sync.
 | Zabbly `7.2.7` | 58–69 MiB/s (3 runs) | 210.7 MiB/s |
 
 md RAID5 hands dm-zoned 4 KiB writes on every one of these kernels. **Why 7.2
-is faster is unknown.** `block/blk-zoned.c` is byte-identical in 7.1.8 and 7.2,
-so it is not zone write plugging. These are historical measurements. Since 2026-10-13 the
+is faster is unknown.** `block/blk-zoned.c` barely changed between 7.1.8 and 7.2.6
+(only setting up and tearing down the zone write plug workqueue),
+so zone write plugging is an unlikely explanation. These are historical measurements. Since 2026-10-13 the
 reference guest runs a self-built kernel.org 7.2.10 (`7.2.10-zonenas` rev 2),
 with the dm-zoned fixes in-tree. That build has not been compared using this exact kernel table.
 
@@ -188,7 +191,7 @@ below were an experiment.
   libata tree for 7.4; dm-zoned v4 was applied and then reverted on 2026-10-13.
   An additional dm-zoned fix, originally patch 4 of v5, stops an idle busy loop.
   **Replace and activate any module lacking that idle-loop fix, including copies
-  obtained earlier on October 13.** A rebuild alone does not replace a loaded module
+  of `patches/dm-zoned-reclaim.patch` obtained before commit e22a5a9 (2026-10-15, 18:37 UTC).** A rebuild alone does not replace a loaded module
   ([09, 4.2a](docs/09-cache-devices-fixes-results.md#42a-dm-zoned-idle-busy-loop-when-no-zone-needs-reclaim-same-patch-since-2026-10-13)).
 - Everything is in [09 — Cache devices without a rebuild, fixes, results](docs/09-cache-devices-fixes-results.md).
 
@@ -323,9 +326,9 @@ Read in this order:
 │   └── dmz-cache-layout-SPEC.md           on-disk layout and the source references behind the tools
 ├── repro/                                 reproducers on a RAM-backed scsi_debug zoned disk (09, 4.5)
 ├── patches/                               kernel 7.2 / dm-zoned-tools 2.2.2 out-of-tree copies (09, section 4)
-│   ├── dm-zoned-reclaim.patch             no random→random loop, reclaim worker keeps polling, no idle busy loop (since 2026-10-13)
+│   ├── dm-zoned-reclaim.patch             no random→random loop, reclaim worker keeps polling, no idle busy loop (since 2026-10-15, e22a5a9)
 │   ├── dmzadm-check-conv-zones.patch      no segfault checking two-device sets
-│   ├── libahci-fbs-reenable.patch         FBS back on after port-multiplier error handling (queued for Linux 7.4 as 21d333ab; verify inclusion in the running kernel; this copy keeps one extra info print)
+│   ├── libahci-fbs-reenable.patch         FBS back on after port-multiplier error handling (queued for Linux 7.4 as 23eab9e8; verify inclusion in the running kernel; this copy keeps one extra info print)
 │   └── upstream/                          as sent to the lists (v1–v5), status table, prepare and reply scripts
 ├── systemd/                               the late boot chain in the guest, plus the kick timer
 │   ├── zonedpool-dmzassemble.service

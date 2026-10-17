@@ -32,7 +32,7 @@ below; different patch variants must not be treated as the same deployment.
   fault and libahci FBS recovery. An additional dm-zoned fix, originally v5
   patch 4, stops the idle CPU loop when no random/cache zone holds data.
   The corrected combined patch includes it. **Replace and activate modules
-  that lack this fix, including copies obtained earlier on October 13.**
+  that lack this fix, including copies of `patches/dm-zoned-reclaim.patch` obtained before commit e22a5a9 (2026-10-15, 18:37 UTC).**
 - The idle loop produces high SCSI-layer TEST UNIT READY request counts;
   libata completes those requests in software for SATA disks. Its measured
   cost is kernel CPU, not a stream of physical ATA commands.
@@ -156,7 +156,10 @@ make compiled modules interchangeable. The reference deployment uses
 in-tree v3 plus zonenas patch 0004 on 7.2.10; it is a separate variant.
 
 **Activation is required.** A module lacking the idle-loop fix is affected
-regardless of download date. Build against the exact kernel headers for
+regardless of download date. A copy of the patch file without the fix contains no `-EBUSY`:
+`grep -c -- -EBUSY dm-zoned-reclaim.patch` prints 0 for an affected copy and 2 for the current one. That
+checks the file, not the running module; after the reboot below, compare
+`/sys/module/dm_zoned/srcversion` with `modinfo -F srcversion` of the module you built. Build against the exact kernel headers for
 the kernel you intend to run. Install under `/lib/modules/<release>/updates/`,
 run `depmod -a <release>`, and regenerate that kernel’s initramfs when the
 module is included. Preserve a known boot fallback. After stopping writers
@@ -193,6 +196,9 @@ current combined patch. The prepared v6 lab run below records a drain by the
 after later idle transitions; the combined patch includes the loop fix.
 
 ### 4.2a dm-zoned: idle busy loop when no zone needs reclaim (same patch, since 2026-10-13)
+
+The public `patches/dm-zoned-reclaim.patch` contains this fix since commit e22a5a9 (2026-10-15, 18:37 UTC);
+2026-10-13 is when the same code was first lab-tested.
 
 Since commit 90a9b8693f1b ("dm zoned: reclaim random zones when idle", 2020), `dmz_should_reclaim()` starts
 reclaim on an idle target whenever the target **has** random (or cache) zones, used or not. When none of them
@@ -256,7 +262,7 @@ awk -v delta="$((after - before))" 'BEGIN {printf "%d requests in 10 s (%.1f/s)\
 ### 4.3 `dmzadm --check/--repair` segfault on two-device sets (`patches/dmzadm-check-conv-zones.patch`)
 
 Sent to the maintainer and dm-devel on 2026-10-10:
-[[PATCH dm-zoned-tools] dmz: check: do not use the write pointer of conventional zones](https://lore.kernel.org/dm-devel/?q=s%3A%22dmz%3A+check%3A+do+not+use+the+write+pointer%22).
+"[PATCH dm-zoned-tools] dmz: check: do not use the write pointer of conventional zones".
 v3 (no code changes) under review since 2026-10-11 ([patchwork series 1183416](https://patchwork.kernel.org/series/1183416/));
 status in [patches/upstream/README.md](../patches/upstream/README.md#status).
 
@@ -283,14 +289,15 @@ Tested on a real hot-plug on 2026-10-10: a drive inserted into a free bay of a m
 `re-enabling FBS after error handling` and "FBS is enabled". Two other drives in that group then read
 259 + 259 MB/s in parallel (one alone: 268 MB/s), so FBS was really back on. The
 `re-enabling FBS after error handling` line comes from the out-of-tree build in `patches/` (used for that test);
-the maintainer-tree version has no extra log line. On a kernel verified to include commit 21d333ab,
+the maintainer-tree version has no extra log line. On a kernel verified to include commit 23eab9e8,
 look only for "FBS is enabled" after the hard reset; a version number alone does not prove inclusion.
 
-**Merged:** applied to the libata tree for Linux 7.4 on 2026-10-12 as commit
-[21d333ab](https://git.kernel.org/libata/linux/c/21d333ab) (v4, after review). The merged code differs from
+**Queued:** applied to the libata tree for Linux 7.4 on 2026-10-12 and re-applied on 2026-10-15 with Damien
+Le Moal's Reviewed-by as commit [23eab9e8](https://git.kernel.org/libata/linux/c/23eab9e8) (v4, after review;
+code unchanged). The merged code differs from
 `patches/libahci-fbs-reenable.patch` only in that the `re-enabling FBS after error handling` line was dropped at
-the reviewer's request; the out-of-tree patch keeps it. Sent to linux-ide on 2026-10-10: [[PATCH] ata: libahci: re-enable FBS after error handling on a port
-multiplier](https://lore.kernel.org/linux-ide/?q=s%3A%22re-enable+FBS+after+error+handling%22).
+the reviewer's request; the out-of-tree patch keeps it. Sent to linux-ide on 2026-10-10: "[PATCH] ata: libahci: re-enable FBS after error handling on a port
+multiplier" (linux-ide has no patchwork).
 
 ### 4.5 Reproducers
 

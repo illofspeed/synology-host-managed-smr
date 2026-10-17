@@ -561,8 +561,9 @@ above it.
     - "dmz: check: do not use the write pointer of conventional zones"
       (dm-zoned-tools; v3 under review), <https://patchwork.kernel.org/series/1183416/>.
     - Related, not dm-zoned: "ata: libahci: re-enable FBS after error handling on a
-      port multiplier" - applied to libata `for-7.4` on 2026-10-12 as commit
-      <https://git.kernel.org/libata/linux/c/21d333ab>; needed by this stack on
+      port multiplier" - applied to libata `for-7.4` on 2026-10-12, re-applied on 2026-10-15
+      with Damien Le Moal's Reviewed-by as commit
+      <https://git.kernel.org/libata/linux/c/23eab9e8>; needed by this stack on
       the 88SE9235 port multipliers, see [09](09-cache-devices-fixes-results.md).
 
   **The two historical D-state incidents remain undiagnosed.** The later
@@ -620,9 +621,10 @@ above it.
   a rotational zoned device are issued from one per-disk thread at queue depth
   1 (the `sdX_zwplugs_worker` monitored in [05](05-operations-monitoring-performance.md)).
   The cover letter reports sequential writes on an SMR drive going from 112 to
-  246 MB/s. The series is already in Linux 7.1, and `block/blk-zoned.c` is
-  identical in 7.1.8 and 7.2, so **it cannot explain why 7.2.6 is faster than
-  7.1.8 on this stack.** That cause is still unknown.
+  246 MB/s. The series is already in Linux 7.1, and `block/blk-zoned.c` barely changed
+  between 7.1.8 and 7.2.6 (only zone write plug workqueue setup and teardown), so
+  **it is an unlikely explanation for why 7.2.6 is faster than 7.1.8 on this
+  stack.** That cause is still unknown.
 
 ### 4.6 Controllers, passthrough and the 88SE9235
 
@@ -949,7 +951,8 @@ idle polling, `dmzadm --repair` destroying a member with a corrupt primary map, 
 off after a port-multiplier hot-plug, and **any published numbers for dm-zoned under md RAID**. dm-zoned's
 kernel code had no commits after 2026-07-15 and dm-zoned-tools none since 2024-05-30. Three of those gaps now
 have public fixes from this guide (chapter 9, `patches/upstream/README.md`): the libahci FIS-based-switching fix
-was applied to the libata tree for Linux 7.4 on 2026-10-12 (commit 21d333ab).
+was applied to the libata tree for Linux 7.4 on 2026-10-12 and re-applied on 2026-10-15
+with Damien Le Moal's Reviewed-by (commit 23eab9e8).
 The dm-zoned v4 series was applied and then reverted on October 13; v5 was sent
 and v6 prepared but not sent. The next submission must split bugfixes from
 enhancements. The `dmzadm --check` v3 fix was under review at that handover.

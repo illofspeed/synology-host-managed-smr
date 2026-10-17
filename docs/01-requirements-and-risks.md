@@ -12,8 +12,9 @@ changing anything, what does not work, and what can go wrong.
 > **Known, unresolved risk:** on 2026-09-24 the NAS kernel panicked inside
 > Synology's own driver for the *internal* drive bays. This happened a few minutes after
 > the passed-through controller had been attached to a freshly started guest,
-> while heavy writes were going through it. There have been two known crashes
-> and both fit this pattern, but the cause is not proven. See
+> while heavy writes were going through it. There have been two known crashes;
+> each coincided with a start or reset of a guest carrying the controller, but
+> the cause is not proven. See
 > [7.1](#71-nas-kernel-panic-in-dsms-own-storage-driver). If you build this,
 > you accept that risk on your own hardware. Back up everything on the NAS
 > first.
@@ -368,8 +369,9 @@ addresses. Do not copy them.** PCI addresses are specific to each machine.
 **What is known and what is not:**
 
 - **Both known crashes fit the same pattern.** Each time, a VMM guest carrying
-  the passed-through 9235 had been started, with I/O going through the
-  controller. That is a correlation, not a cause.
+  the passed-through 9235 had been started a few minutes earlier (2026-09-24) or
+  was reset by its watchdog in the same second as the NAS (2026-09-19), with I/O
+  going through the controller. That is a correlation, not a cause.
 - **The mechanism is not proven.** The fault is inside Synology's closed
   driver. Other VMM activity was also going on in the same minutes. This NAS
   had also had unexplained resets earlier in 2026, before the controller was
@@ -470,7 +472,8 @@ addresses. Do not copy them.** PCI addresses are specific to each machine.
   | Zabbly 7.2.7 | 58–69 MiB/s | 210.7 MiB/s |
 
   Why 7.2 is faster is **unknown**. On every kernel, md RAID5 passes dm-zoned
-  4 KiB writes, and `block/blk-zoned.c` is byte-identical in 7.1.8 and 7.2.
+  4 KiB writes, and `block/blk-zoned.c` barely changed between 7.1.8 and 7.2.6
+  (only zone write plug workqueue setup and teardown).
   Details are in [05](05-operations-monitoring-performance.md).
 - **Port multipliers.** Two drives on one 88SM9705 link share its bandwidth
   (see [section 4](#4-hard-requirements)).
@@ -548,9 +551,9 @@ Plugging or pulling any drive behind one of the DX1222's port multipliers freeze
 on that multiplier while libata recovers it: **12 s** for a pull and **25 s** for an insert in
 the test of 2026-09-28. The other drives lost no data and logged no errors, but every I/O to
 them waited. See [05, section 3.7](05-operations-monitoring-performance.md#37-replacing-a-drive-tested-2026-09-28).
-On kernels lacking the fix in commit `21d333ab` the same event can also leave FIS-based switching off on that port until
+On kernels lacking the fix in commit `23eab9e8` the same event can also leave FIS-based switching off on that port until
 the next boot, which halves parallel reads from the other drives in the group; the guide's libahci
-patch fixes it and was applied to the libata tree for Linux 7.4 as commit 21d333ab
+patch fixes it and was applied to the libata tree for Linux 7.4 as commit 23eab9e8
 ([09, 4.4](09-cache-devices-fixes-results.md#44-libahci-fis-based-switching-stays-off-after-a-hot-plug-patcheslibahci-fbs-reenablepatch)).
 
 ### 7.9 Cache devices make the pool depend on them
