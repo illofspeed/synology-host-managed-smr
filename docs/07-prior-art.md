@@ -559,10 +559,10 @@ above it.
       <https://patchwork.kernel.org/series/1183414/>; v5 of 2026-10-13 adds a fourth
       patch for an idle busy loop present since 2020 (chapter 9, 4.2a).
     - "dmz: check: do not use the write pointer of conventional zones"
-      (dm-zoned-tools; v3 under review), <https://patchwork.kernel.org/series/1183416/>.
+      (dm-zoned-tools; merged as b06b6bbdf3), <https://patchwork.kernel.org/series/1183416/>.
     - Related, not dm-zoned: "ata: libahci: re-enable FBS after error handling on a
       port multiplier" - applied to libata `for-7.4` on 2026-10-12, re-applied on 2026-10-15
-      with Damien Le Moal's Reviewed-by as commit
+      with Damien Le Moal's Reviewed-by, in mainline since 7.4-rc1, commit
       <https://git.kernel.org/libata/linux/c/23eab9e8>; needed by this stack on
       the 88SE9235 port multipliers, see [09](09-cache-devices-fixes-results.md).
 
@@ -723,9 +723,9 @@ What this repository does **not** add:
 - Any new storage layer. dm-zoned, md, LUKS2 and XFS are standard upstream
   components; the repository carries three patch files covering several fixes
   ([09, section 4](09-cache-devices-fixes-results.md#4-bugs-found-and-the-patches)):
-  two kernel patches (libahci, merged into the libata tree for Linux 7.4;
+  two kernel patches (libahci, in mainline since 7.4-rc1;
   dm-zoned, v4 applied then reverted pending a bugfix/enhancement split)
-  and one dmzadm fix (v3 under review at the October 13 handover).
+  and one dmzadm fix (merged in dm-zoned-tools).
 - Evidence that the design is safe in general. It goes against the published
   advice in [section 3](#3-published-advice-against-this-design), it has run
   for days on one system, and one NAS kernel panic remains unexplained
@@ -955,7 +955,7 @@ was applied to the libata tree for Linux 7.4 on 2026-10-12 and re-applied on 202
 with Damien Le Moal's Reviewed-by (commit 23eab9e8).
 The dm-zoned v4 series was applied and then reverted on October 13; v5 was sent
 and v6 prepared but not sent. The next submission must split bugfixes from
-enhancements. The `dmzadm --check` v3 fix was under review at that handover.
+enhancements. The `dmzadm --check` fix has since been merged (b06b6bbdf3).
 
 Known in part: the write-twice mechanism of dm-zoned (Reinecke, SDC 2020), md RAID5's 4 KiB discard
 granularity (linux-raid, 2019), DSM's `skip_seq_thresh_kb` (007revad's Synology_enable_sequential_IO), the

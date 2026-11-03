@@ -38,8 +38,7 @@ below; different patch variants must not be treated as the same deployment.
   cost is kernel CPU, not a stream of physical ATA commands.
 - Dated upstream history: libahci was applied to libata for 7.4; dm-zoned
   v4 was applied and then reverted on October 13. v6 is prepared, **not sent**;
-  the next submission must split bugfixes from enhancements. dmzadm v3
-  was under review at the handover. See [status](../patches/upstream/README.md#status).
+  v7, posted on 2026-11-03 on 7.4-rc1, splits the bugfixes from the polling enhancement. The dmzadm fix is merged (dm-zoned-tools b06b6bbdf3). See [status](../patches/upstream/README.md#status).
 - **Never run `dmzadm --repair` on a member whose check reports invalid chunk mappings**: in the lab it
   turned one damaged map block into the loss of every chunk on the member (section 5.1).
 
@@ -263,7 +262,7 @@ awk -v delta="$((after - before))" 'BEGIN {printf "%d requests in 10 s (%.1f/s)\
 
 Sent to the maintainer and dm-devel on 2026-10-10:
 "[PATCH dm-zoned-tools] dmz: check: do not use the write pointer of conventional zones".
-v3 (no code changes) under review since 2026-10-11 ([patchwork series 1183416](https://patchwork.kernel.org/series/1183416/));
+v3 (no code changes; [patchwork series 1183416](https://patchwork.kernel.org/series/1183416/)) is merged as of 2026-11-02: dm-zoned-tools b06b6bbdf3;
 status in [patches/upstream/README.md](../patches/upstream/README.md#status).
 
 In `dmz_check_mapped_zone_bitmap()` the write-pointer test runs for every mapped zone that is not a "cache"

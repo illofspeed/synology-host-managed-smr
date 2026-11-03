@@ -1,0 +1,115 @@
+Subject: [PATCH v7 0/2] dm zoned: fix idle reclaim busy loops
+
+Two dm-zoned reclaim fixes for the 7.4 cycle and stable, split from the
+earlier series as Mikulas asked after reverting v4 from dm-7.4: these
+two carry Fixes and Cc: stable; the third change, "dm zoned: keep
+polling for idle reclaim after a reclaim pass", will follow separately
+for 7.5 and depends on patch 1 of this series.
+
+1/2 stops dmz_reclaim_work() from rescheduling itself at once when a
+pass cannot make progress (-ENOSPC: no zone to copy into; -EBUSY: no
+zone to reclaim). On an idle target that retry ran without pause and
+called dmz_check_dev() on every pass. 2/2 stops idle reclaim from
+copying a random zone into another random zone, which frees nothing;
+its -ENOSPC result relies on the back-off from 1/2, so the order
+matters for backports too.
+
+v5: https://lore.kernel.org/r/20261013145522.17499-1-illofspeed@gmail.com
+Mikulas's request:
+https://lore.kernel.org/r/b7e35437-de42-d078-e75a-1f08541eb725@redhat.com
+Damien on v5 4/4:
+https://lore.kernel.org/r/bf59b38e-635d-48b8-861f-e50961472e92@kernel.org
+
+Changes since v5 (posted on 2026-10-13; a v6 was prepared but never
+sent):
+- Rebased on 7.4-rc1 without conflicts; its dm-zoned sources are
+  identical to those of 7.3-rc7, on which v5 was based.
+- 1/2 (was "dm zoned: back off when reclaim finds no destination zone")
+  also takes the -EBUSY back-off from v5 4/4, as Damien asked ("This is
+  undoing what patch 1 does"), but not v5 4/4's dmz_should_reclaim()
+  change (idle reclaim only when a zone holds data). Without the
+  polling patch that change stopped the idle poll after a complete idle
+  drain, so later data was not reclaimed until the next allocation;
+  the back-off alone stops both loops. Hannes's and Damien's
+  Reviewed-by from v5 1/4 are dropped because the patch changed, as is
+  Hannes's later one on v3 1/3 (2026-10-21).
+- 2/2: code unchanged since v3; Damien's Reviewed-by kept, Hannes's
+  added from his reply to v3 2/3 (2026-10-21).
+- The polling patch is no longer part of this series (see above).
+  Hannes, your comment on v3 3/3 concerns code that v4 moved into
+  dmz_schedule_reclaim(), as Damien asked. The polling patch keeps that
+  form, which avoids one extra run of the work after a pass that leaves
+  reclaim not needed; if you prefer the unconditional reschedule,
+  please say so and I will change it.
+- The Assisted-by tags are gone, following commit 1e035297ffda ("docs:
+  remove Assisted-by references"); tool use is described below.
+- Commit messages: test results for exactly these patches on 7.4-rc1;
+  measured rates are SCSI request counts, not commands reaching the
+  drives.
+
+Tested on 7.4-rc1 with emulated host-managed drives (scsi_debug),
+RAM-backed: idle request rate and reclaim passes against the stock
+module (1/2), the random-to-random case on a two-device target (2/2),
+and checksums of all written data; details are in the commit messages.
+md/dm-zoned reassembly after target removal was also clean, and a target
+suspend and a "reclaim" message each landed during a copy with no hang
+or kernel warning.
+
+Also tested on three 27 TB host-managed SATA drives, each a
+single-device dm-zoned target (998 random zones of 256 MiB) used as an
+md RAID5 member under dm-crypt and XFS, with the stock module and with
+both patches built out of tree for 7.2.10 (whose dm-zoned sources differ
+from 7.4-rc1 only in three places where 7.2.10 open-codes
+clear_and_wake_up_bit()). One run per module, kprobes attached
+throughout; the drives sit behind a SATA port multiplier on a Marvell
+88SE9235, and two other drives on the same controller were being
+zero-filled at about 218 MB/s each, which affects the absolute numbers:
+- idle for 300 s with all random zones free: stock, about 32.5 million
+  reclaim passes per worker, each with a TEST UNIT READY that libata
+  completes in software (about 108,000 SCSI requests per second per
+  member) and about 915 s of system CPU time across all CPUs; patched,
+  29-30 passes per worker, no dmz_check_dev() call, 58 requests per
+  member and about 46 s of system CPU time. Those passes issue no I/O:
+  the requests come with the target's periodic metadata flush;
+- 300 s of single-threaded random 4 KiB O_DIRECT overwrites spread over
+  1,100 chunks (more chunks than random zones), with dm-zoned's free
+  random zone percentage at or below 30 (at most 309 of 998 free) in
+  72-79% of the samples: 2,457 (stock) and 2,395 (patched) writes,
+  99th percentile latency 0.49 s and 0.48 s;
+- a target suspend with the array running, and removal of one
+  member's dm-zoned target after the array was stopped, each while
+  reclaim was copying a full zone (patched): each waited about 11 s
+  for the copy to end, with no hang or kernel warning (with stock,
+  reclaim on the member to be suspended had stopped after a busy pass,
+  so there was no copy to overlap; the stock removal also waited for
+  its copy);
+- sha256 of all written data, read back at the end of each run: no
+  mismatch; md parity checks of every stripe of the suspend/removal
+  test and of a random sample (about 4%) of the other written stripes:
+  no mismatch.
+
+2/2's case does not arise on these single-device targets. As with the
+stock module, reclaim still stops after a pass that ends while the
+target is busy and reclaim is not needed (here: after a busy pass at
+31% free, no pass for 600 s); the polling patch addresses that.
+
+Not tested:
+- the back-off while the target is busy: in the overwrite test every
+  reclaim pass copied a zone, so no pass ended with -ENOSPC or -EBUSY;
+- the -ENOSPC back-off on a single-device target without cache zones
+  (found by code inspection) and recovery after a sequential zone is
+  freed (neither test setup could establish those states);
+- the effect of the cache-to-random fallback that 2/2 keeps: 6 such
+  copies completed while the two-device target was being filled, but
+  the test of its effect could not establish its starting state;
+- system reboot and shutdown; only stopping and reassembling the md
+  array and the dm-zoned targets was exercised;
+- stable kernels at run time, other than the 7.2.10 runs above. Both
+  patches apply with at most a 2-line offset to 7.3.1, 7.2.15, 6.18.60,
+  6.12.115, 6.6.161, 6.1.191, 5.15.224 and 5.10.273, and the dm-zoned
+  objects build there without warnings (x86-64 defconfig plus dm-zoned,
+  W=1).
+
+I used LLM coding assistants for root-cause analysis, drafts of the
+code and changelogs, the test harnesses and reviews. I reviewed the code
+and changed it where needed, and I am responsible for these patches.

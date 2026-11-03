@@ -12,29 +12,32 @@ Historical mail series are retained unchanged: `dm-zoned-reclaim/` (v1/v2),
 (applied, then reverted), `dm-zoned-reclaim-v5/` (sent), and
 `dm-zoned-reclaim-v6/` (**prepared, not sent**). The old covers describe
 what was known when prepared, including superseded in-tree status. They
-are historical artifacts, not current send instructions. libahci v4 was
-applied to libata for-7.4; dmzadm v3 was under review at the October 13 handover.
+are historical artifacts, not current send instructions. As of 2026-11-02,
+libahci v4 is in mainline 7.4-rc1 (23eab9e87749) and the dmzadm fix is merged in
+dm-zoned-tools (b06b6bbdf3, applied by Damien Le Moal on 2026-10-19).
 
-**Sending remains on hold:** wait until 7.4-rc1, split bugfixes (Fixes and
-Cc: stable) from the polling enhancement, and require maintainer-tree and
-unanswered-reply checks, a SHA-256 review stamp, evidence file, all-copies
-check, 24-hour pacing and a single owning session. These gates are proposed,
-not implemented by the old SHA-only prepare script. The owner sends mail;
+**dm-zoned, as of 2026-11-03:** v7 (the two bugfixes, with Fixes and Cc: stable) is posted,
+retested on 7.4-rc1. The polling enhancement follows for 7.5 once the first fix is in the dm tree.
+Sending requires maintainer-tree and unanswered-reply checks, a SHA-256 review stamp, an evidence
+file, an all-copies check, 24-hour pacing and a single owning session; the v7 send script
+(`dm-zoned-reclaim-v7/`) implements these gates, the older SHA-only prepare scripts do not. The owner sends mail;
 publishing this guide does not authorize or perform a kernel submission.
 
-`Signed-off-by` is added by the submitter at send time; AI assistance is disclosed with `Assisted-by`, as
-`Documentation/process/coding-assistants.rst` requires.
+`Signed-off-by` is added by the submitter at send time. Since 7.4-rc1 (commit 1e035297ffda) the kernel
+process no longer uses the `Assisted-by` tag, so tool use is described in the cover letter, as
+`Documentation/process/generated-content.rst` asks. The stored copies up to v6 still carry the tag.
 
 ## Status
 
-Checked 2026-10-15: linux-dm `dm-7.4` and `for-next` both point to
-`334714e4bdf8868c17a7650a7502ba1c90a8721f`; their reclaim source lacks the busy-loop
-correction. [Evidence](../../docs/evidence/dm-zoned-idle-2026-10-13/README.md).
+Checked 2026-11-02: linux-dm `dm-7.4` and `for-next` both point to
+`334714e4bdf8868c17a7650a7502ba1c90a8721f`, which is already in 7.4-rc1; the reclaim source there
+lacks the busy-loop correction. [Evidence](../../docs/evidence/dm-zoned-idle-2026-10-13/README.md).
 
 | Series | Sent / status | Where |
 |---|---|---|
 | `dm-zoned-reclaim/` (0/3 + 3) | 2026-10-10 to dm-devel, the device-mapper maintainers, Hannes Reinecke, Damien Le Moal, LKML | [patchwork](https://patchwork.kernel.org/series/1182929/) |
 | `dm-zoned-reclaim-v3/` | **ACCEPTED**: all three patches marked accepted in patchwork by 2026-10-13 (delegate: Mikulas Patocka); in dm-7.4 they were replaced by v4 on 2026-10-13 (row below). Hannes Reinecke: `Reviewed-by` on patch 1 (given on v1; the code is unchanged in v3, reply in `replies/`). Sent 2026-10-11 after Damien Le Moal's review of v2 (patches 1 and 3 looked OK; patch 2: clearer comment, redundant test dropped; author's full name); lab: reproducer 0 MB/s, pool checksums OK | [patchwork](https://patchwork.kernel.org/series/1183414/) |
+| `dm-zoned-reclaim-v7/` | **SENT 2026-11-03** 23:04 CET, cover `<20261103220438.510609-1-illofspeed@gmail.com>`: [PATCH v7 0/2], the bugfixes split from the polling enhancement as Mikulas Patocka asked, on 7.4-rc1 (see its cover letter for changes and tests). The stored copies keep the no-reply identity and have no `Signed-off-by` | lore: <https://lore.kernel.org/r/20261103220438.510609-1-illofspeed@gmail.com> |
 | `dm-zoned-reclaim-v6/` | **prepared 2026-10-13, NOT SENT; sending held pending the split and gates above** (owner) after Damien Le Moal asked on v5 4/4 to fold that patch into patch 1 ("This is undoing what patch 1 does"): patch 1 now backs off on -ENOSPC and -EBUSY and reclaims on idle only when a zone holds data (subject "dm zoned: back off when reclaim cannot make progress", both Fixes tags, Reviewed-by tags dropped because it changed); patches 2-3 retain the earlier v4 code, subsequently reverted from dm-7.4. Final code identical to v5 apart from one comment. Tested on 7.3-rc7 with exactly this code: idle md RAID5 of three emulated members 18 SCSI commands in 30 s vs 5,804,292 with stock; the old sampler CPU percentage is not a valid kernel-CPU measurement (see evidence); all random zones free by the +90-second sample after a 2 GiB burst; scsi_debug reproducer 0 MB/s. Commit messages also state that libata completes TEST UNIT READY in software (the cost of the loop was CPU time). The historical `prepare-v6-dm-zoned.sh` checks file hashes only; it does not satisfy the required send gates and must not be used to send this unsplit series. | |
 | `dm-zoned-reclaim-v5/` | **SENT 2026-10-13** 16:55 CEST ([patchwork series 1184850](https://patchwork.kernel.org/series/1184850/)): v4 patches 1-3 + a new patch 4 that stops an idle reclaim busy loop present since 90a9b8693f1b (made recurrent across idle periods by patch 3): on 7.3-rc7 idle stock 181,195 / v4 187,707 / v5 under 1 SCSI command/s. Its cover letter said v3 was in dm-7.4; v4 had already replaced it there at 15:36 CEST. Damien Le Moal asked to fold patch 4 into patch 1 (v6, row above). | [patchwork](https://patchwork.kernel.org/series/1184850/) |
 | `dm-zoned-reclaim-v4/` | **APPLIED, THEN REVERTED 2026-10-13** by Mikulas Patocka in linux-dm `dm-7.4` / `for-next` (acce1b6ac, 60427628f, ac82aa060, replacing v3; checked 2026-10-13). Sent 2026-10-13 ([patchwork series 1184722](https://patchwork.kernel.org/series/1184722/)) after Damien Le Moal's review of v3: Fixes tag on patch 1, Reviewed-by from Hannes Reinecke (patch 1) and Damien Le Moal (patches 1-2), patch 3 moved into `dmz_schedule_reclaim()` as he suggested (with `queue_delayed_work()`, after an independent review found that `mod_delayed_work()` there could keep postponing needed reclaim). Tested on 7.3-rc7 in the lab VM: reproducer 500-660 MB/s stock vs 0 MB/s; lab pool checksums OK; idle reclaim after a write burst within 2 min without a reclaim message. The fix for an older idle busy loop (present in mainline since 2020, `90a9b8693f1b`: an idle target with nothing to reclaim requeues the reclaim work at once and issues TEST UNIT READY without pause) followed as v5 patch 4, folded into patch 1 in v6 (rows above). | [patchwork](https://patchwork.kernel.org/series/1184722/) |

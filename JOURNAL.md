@@ -3,6 +3,10 @@
 Newest first. Changes and validation for the public guide; private host operations remain
 in their owning repositories.
 
+## 2026-11-02 — claude — status text: libahci in 7.4-rc1, dmzadm merged, Assisted-by gone
+
+Changed: patches/upstream/README.md, docs/07-prior-art.md, docs/09-cache-devices-fixes-results.md (current-state lines only). v7 was posted on 2026-11-03 (23:04 CET); `patches/upstream/dm-zoned-reclaim-v7/` holds the stored copies and the send tooling. Not committed.
+
 ## 2026-10-17 — claude — libahci FBS fix: new upstream commit ID
 
 Changed: every reference to libata commit 21d333ab now names 23eab9e8 (7 files); the upstream status row records the re-apply.
